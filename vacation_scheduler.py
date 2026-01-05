@@ -11,7 +11,12 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Dict, List, Set, Tuple
-import random
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
 
 
 class Employee:
@@ -314,6 +319,153 @@ def print_vacation_results(
     print("=" * 70)
 
 
+def export_schedule_to_excel(
+    vacation_schedule: Dict[str, List[datetime]],
+    employees: List[Employee],
+    start_date: datetime,
+    num_weeks: int,
+    filename: str = "vacation_schedule.xlsx"
+) -> str:
+    """Export vacation schedule to Excel file with visual calendar view.
+    
+    Args:
+        vacation_schedule: Dict mapping employee name -> list of vacation dates
+        employees: List of all employees
+        start_date: Start date of vacation period
+        num_weeks: Number of weeks in the period
+        filename: Output filename (default: vacation_schedule.xlsx)
+    
+    Returns:
+        Path to the generated file
+    """
+    if not OPENPYXL_AVAILABLE:
+        print("\nWarning: openpyxl not available. Cannot generate Excel file.")
+        print("Install with: pip install openpyxl")
+        return None
+    
+    # Create workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Vacation Schedule"
+    
+    # Generate all dates in the period
+    dates = []
+    current = start_date
+    for _ in range(num_weeks * 7):
+        dates.append(current)
+        current += timedelta(days=1)
+    
+    # Define styles
+    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+    vacation_fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
+    working_fill = PatternFill(start_color="FFE4B5", end_color="FFE4B5", fill_type="solid")
+    weekend_header_fill = PatternFill(start_color="FF6B6B", end_color="FF6B6B", fill_type="solid")
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    center_align = Alignment(horizontal='center', vertical='center')
+    
+    # Write header row (dates)
+    ws.cell(1, 1, "Employee").fill = header_fill
+    ws.cell(1, 1).font = header_font
+    ws.cell(1, 1).alignment = center_align
+    ws.cell(1, 1).border = border
+    ws.column_dimensions['A'].width = 20
+    
+    for col_idx, date in enumerate(dates, start=2):
+        cell = ws.cell(1, col_idx)
+        day_name = date.strftime('%a')
+        date_str = date.strftime('%d/%m')
+        cell.value = f"{day_name}\n{date_str}"
+        cell.font = header_font
+        cell.alignment = center_align
+        cell.border = border
+        
+        # Different color for weekends
+        if date.weekday() >= 5:
+            cell.fill = weekend_header_fill
+        else:
+            cell.fill = header_fill
+        
+        ws.column_dimensions[cell.column_letter].width = 8
+    
+    # Add "Total" column
+    total_col = len(dates) + 2
+    ws.cell(1, total_col, "Total").fill = header_fill
+    ws.cell(1, total_col).font = header_font
+    ws.cell(1, total_col).alignment = center_align
+    ws.cell(1, total_col).border = border
+    ws.column_dimensions[ws.cell(1, total_col).column_letter].width = 8
+    
+    # Convert vacation_schedule to set of dates for faster lookup
+    vacation_dates_by_employee = {
+        name: set(dates) for name, dates in vacation_schedule.items()
+    }
+    
+    # Write employee rows
+    for row_idx, emp in enumerate(sorted(employees, key=lambda e: e.name), start=2):
+        # Employee name
+        name_cell = ws.cell(row_idx, 1, emp.name)
+        name_cell.border = border
+        name_cell.alignment = Alignment(vertical='center')
+        
+        vacation_count = 0
+        
+        # Mark vacation days
+        for col_idx, date in enumerate(dates, start=2):
+            cell = ws.cell(row_idx, col_idx)
+            cell.border = border
+            cell.alignment = center_align
+            
+            if date in vacation_dates_by_employee.get(emp.name, set()):
+                cell.value = "V"
+                cell.fill = vacation_fill
+                cell.font = Font(bold=True)
+                vacation_count += 1
+            else:
+                cell.value = ""
+                cell.fill = working_fill
+        
+        # Total vacation days
+        total_cell = ws.cell(row_idx, total_col, vacation_count)
+        total_cell.border = border
+        total_cell.alignment = center_align
+        total_cell.font = Font(bold=True)
+    
+    # Add summary row
+    summary_row = len(employees) + 3
+    ws.cell(summary_row, 1, "Employees on vacation:").font = Font(bold=True)
+    ws.cell(summary_row, 1).alignment = Alignment(vertical='center')
+    
+    for col_idx, date in enumerate(dates, start=2):
+        count = sum(1 for emp in employees 
+                   if date in vacation_dates_by_employee.get(emp.name, set()))
+        cell = ws.cell(summary_row, col_idx, count)
+        cell.alignment = center_align
+        cell.font = Font(bold=True)
+        cell.border = border
+        
+        # Color code based on count
+        if count > 0:
+            # Gradient from light to dark green
+            intensity = min(count / 10, 1.0)
+            green_val = int(144 + (0 - 144) * intensity)
+            hex_color = f"90{green_val:02X}90"
+            cell.fill = PatternFill(start_color=hex_color, end_color=hex_color, fill_type="solid")
+    
+    # Freeze panes
+    ws.freeze_panes = 'B2'
+    
+    # Save workbook
+    wb.save(filename)
+    return filename
+
+
+
 def main():
     """Main entry point."""
     employees_file = "employees.csv"
@@ -377,6 +529,22 @@ def main():
     
     # Print results
     print_vacation_results(vacation_schedule, employees, num_weeks, target_days)
+    
+    # Export to Excel
+    print("\nGenerating Excel schedule...")
+    excel_file = export_schedule_to_excel(
+        vacation_schedule,
+        employees,
+        start_date,
+        num_weeks,
+        "vacation_schedule.xlsx"
+    )
+    
+    if excel_file:
+        print(f"✓ Excel schedule saved to: {excel_file}")
+    else:
+        print("✗ Could not generate Excel file (openpyxl not available)")
+
 
 
 if __name__ == "__main__":

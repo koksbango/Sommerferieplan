@@ -18,7 +18,7 @@ The scheduler considers:
 ## Requirements
 
 - Python 3.6 or higher
-- No external dependencies (uses only standard library)
+- **openpyxl** (for Excel export): `pip install openpyxl`
 
 ## Installation
 
@@ -26,6 +26,11 @@ Clone this repository:
 ```bash
 git clone https://github.com/koksbango/Sommerferieplan.git
 cd Sommerferieplan
+```
+
+Install dependencies (optional, for Excel export):
+```bash
+pip install -r requirements.txt
 ```
 
 ## Usage
@@ -51,19 +56,29 @@ python3 vacation_scheduler.py employees.csv coverage.csv 2024-06-01 6 21
 **Example output:**
 ```
 Vacation capacity:
-  Weekdays: up to 39 employees on vacation (need 35 working)
+  Weekdays: up to 43 employees on vacation (need 31 working)
   Weekends: up to 48 employees on vacation (need 26 working)
 
 Theoretical maximum:
-  Total vacation-day capacity: 1746
-  If distributed equally: 23 days per employee
+  Total vacation-day capacity: 1555
+  If distributed equally: 21 days per employee
 
 Results:
   Total vacation days allocated: 1554
   Average per employee: 21.0 days
   Minimum: 21 days
   Maximum: 21 days
+
+Generating Excel schedule...
+✓ Excel schedule saved to: vacation_schedule.xlsx
 ```
+
+The scheduler automatically generates an **Excel file** (`vacation_schedule.xlsx`) with a visual calendar showing:
+- Each employee's vacation days marked with "V"
+- Color-coded vacation (green) vs working days (beige)
+- Weekend dates highlighted in red
+- Total vacation days per employee
+- Daily count of employees on vacation
 
 ### Vacation Calculator
 

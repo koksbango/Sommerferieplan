@@ -30,3 +30,6 @@ Thumbs.db
 /tmp/
 *.tmp
 *.bak
+
+# Generated files
+vacation_schedule.xlsx

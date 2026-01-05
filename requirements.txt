@@ -1,0 +1,2 @@
+# Requirements for vacation scheduler Excel export
+openpyxl>=3.0.0
