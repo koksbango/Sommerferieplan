@@ -223,11 +223,11 @@ def optimize_vacation_schedule(
     group_size = num_employees // 2  # Split into two groups (nearly equal if odd number)
     
     # Balance groups by weekly_target_hours
-    # Sort employees by weekly_target_hours to enable balanced distribution
+    # Sort employees by weekly_target_hours descending to enable balanced distribution
     employees_by_hours = sorted(employees, key=lambda e: e.weekly_target_hours, reverse=True)
     
-    # Use alternating assignment to balance total hours between groups
-    # This is like dealing cards - alternate between groups to keep them balanced
+    # Use alternating assignment (highest to group1, next highest to group2, etc.)
+    # to balance total hours between groups
     group1_base = []
     group2_base = []
     for i, emp in enumerate(employees_by_hours):
@@ -236,9 +236,8 @@ def optimize_vacation_schedule(
         else:
             group2_base.append(emp)
     
-    # Trim to ensure equal size (if odd number, one group gets extra person)
-    if len(group1_base) > group_size:
-        group2_base.append(group1_base.pop())
+    # With odd number of employees, one group will have one more person
+    # No adjustment needed - the alternating pattern already handles this optimally
     
     total_hours_group1 = sum(e.weekly_target_hours for e in group1_base)
     total_hours_group2 = sum(e.weekly_target_hours for e in group2_base)
@@ -280,7 +279,19 @@ def optimize_vacation_schedule(
         # Start with largest block size that fits in the smaller half
         max_block_size = min(max_block_first_half, max_block_second_half)
         
-        for target_block_size in range(min(target_days_per_employee, max_block_size), max(6, max_block_size - 8), -1):
+        # Ensure we have a valid range - start from max possible and go down to minimum of 6 days
+        start_size = min(target_days_per_employee, max_block_size)
+        end_size = max(1, max_block_size - 8)  # At least try down to 1 day
+        
+        # Only proceed if we can fit at least some vacation days
+        if start_size < 1:
+            continue
+            
+        for target_block_size in range(start_size, end_size - 1, -1):
+            # Skip if block won't fit in either half
+            if target_block_size > mid_point or target_block_size > (len(dates) - mid_point):
+                continue
+                
             temp_schedule = {emp.name: [] for emp in employees}
             temp_vacation_by_date = {date: set() for date in dates}
             
@@ -290,7 +301,9 @@ def optimize_vacation_schedule(
                 best_block = None
                 
                 # Try different start positions in first half
-                for start_idx in range(0, mid_point - target_block_size + 1):
+                # Ensure we don't go past the boundary
+                max_start_first = max(0, mid_point - target_block_size + 1)
+                for start_idx in range(0, max_start_first):
                     end_idx = start_idx + target_block_size
                     candidate_block = dates[start_idx:end_idx]
                     
@@ -336,7 +349,9 @@ def optimize_vacation_schedule(
                 best_block = None
                 
                 # Try different start positions in second half
-                for start_idx in range(mid_point, len(dates) - target_block_size + 1):
+                # Ensure we don't go past the end
+                max_start_second = max(mid_point, len(dates) - target_block_size + 1)
+                for start_idx in range(mid_point, max_start_second):
                     end_idx = start_idx + target_block_size
                     candidate_block = dates[start_idx:end_idx]
                     

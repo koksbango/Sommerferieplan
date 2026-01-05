@@ -85,6 +85,8 @@ Results:
   Minimum: 17 days
   Maximum: 17 days
 
+**Note:** With 5 weeks (35 days) and two equal groups, the maximum achievable is 17 consecutive days per employee while maintaining coverage. To achieve the 21-day target, consider extending the period to 6 weeks.
+
 Shift distribution statistics:
   Employees with shifts: 74
   Shift count range: 9 - 15 shifts
