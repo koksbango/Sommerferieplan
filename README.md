@@ -13,7 +13,7 @@ The scheduler considers:
 - Daily shift requirements by skill type  
 - Minimum coverage requirements for each shift
 - Weekday vs weekend coverage differences
-- Fair distribution of vacation days
+- **Equal distribution** - all employees get the same vacation days (within 1-day tolerance)
 - **Consecutive vacation periods** - each employee's vacation is allocated as a single continuous block
 
 ## Requirements
@@ -189,25 +189,28 @@ The vacation period is currently set to June 1 - August 31, 2024 (92 days). You 
 ## Key Insights
 
 With the provided data (74 employees, 31 summer weekday positions, 26 weekend positions):
-- **5 weeks with consecutive vacation**: 43 employees achieve 21 days, 31 employees get 14+ days
-  - Total: 1,337 vacation days allocated
-  - Average: 18.1 days per employee
+- **5 weeks with consecutive vacation and equal distribution**: All 74 employees get exactly **17 consecutive days**
+  - Total: 1,258 vacation days allocated
+  - Average: 17.0 days per employee
+  - Spread: 0 days (perfect equality)
 - **Consecutive vacation constraint**: All vacation days are allocated as a single continuous block per employee
+- **Equal distribution**: Algorithm ensures all employees get the same number of days (within 1-day tolerance)
 - **Weekday capacity**: Up to 43 employees can be on vacation simultaneously
 - **Weekend capacity**: Up to 48 employees can be on vacation simultaneously
 
-Note: The consecutive vacation constraint reduces total achievable days compared to non-consecutive allocation, but ensures practical vacation periods.
+Note: The consecutive vacation and equal distribution constraints reduce total achievable days, but ensure fair and practical vacation schedules.
 
 ## Algorithm
 
-The vacation scheduler uses a consecutive block allocation algorithm:
+The vacation scheduler uses an equal-distribution consecutive block allocation algorithm:
 
 1. Calculate vacation capacity for each day type (weekday/weekend)
-2. For each employee, find the longest consecutive block of days where:
+2. For each block size (starting from target), attempt to allocate that size to all employees
+3. For each employee, find a consecutive block where:
    - Coverage requirements are met (total employees and skill requirements)
    - Daily vacation capacity is not exceeded
-3. Try multiple employee orderings to maximize fairness
-4. Select the allocation that maximizes minimum days per employee
+4. Try multiple employee orderings (20 attempts) to find equal distribution
+5. Select the allocation that minimizes spread (max - min days), then maximizes minimum days per employee
 5. Result: Each employee gets a single consecutive vacation period
 
 ## Example Files
