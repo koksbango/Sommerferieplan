@@ -322,15 +322,21 @@ def print_vacation_results(
 def export_schedule_to_excel(
     vacation_schedule: Dict[str, List[datetime]],
     employees: List[Employee],
+    coverage_weekday: List[CoverageRequirement],
+    coverage_weekend: List[CoverageRequirement],
+    shifts: Dict[str, 'Shift'],
     start_date: datetime,
     num_weeks: int,
     filename: str = "vacation_schedule.xlsx"
 ) -> Optional[str]:
-    """Export vacation schedule to Excel file with visual calendar view.
+    """Export vacation schedule to Excel file with visual calendar view and shift coverage.
     
     Args:
         vacation_schedule: Dict mapping employee name -> list of vacation dates
         employees: List of all employees
+        coverage_weekday: Coverage requirements for weekdays
+        coverage_weekend: Coverage requirements for weekends
+        shifts: Dict mapping shift name to Shift object
         start_date: Start date of vacation period
         num_weeks: Number of weeks in the period
         filename: Output filename (default: vacation_schedule.xlsx)
@@ -345,8 +351,10 @@ def export_schedule_to_excel(
     
     # Create workbook
     wb = Workbook()
-    ws = wb.active
-    ws.title = "Vacation Schedule"
+    
+    # Create vacation schedule sheet
+    ws_vacation = wb.active
+    ws_vacation.title = "Vacation Schedule"
     
     # Generate all dates in the period
     dates = []
@@ -369,15 +377,15 @@ def export_schedule_to_excel(
     )
     center_align = Alignment(horizontal='center', vertical='center')
     
-    # Write header row (dates)
-    ws.cell(1, 1, "Employee").fill = header_fill
-    ws.cell(1, 1).font = header_font
-    ws.cell(1, 1).alignment = center_align
-    ws.cell(1, 1).border = border
-    ws.column_dimensions['A'].width = 20
+    # Write header row (dates) for vacation schedule
+    ws_vacation.cell(1, 1, "Employee").fill = header_fill
+    ws_vacation.cell(1, 1).font = header_font
+    ws_vacation.cell(1, 1).alignment = center_align
+    ws_vacation.cell(1, 1).border = border
+    ws_vacation.column_dimensions['A'].width = 20
     
     for col_idx, date in enumerate(dates, start=2):
-        cell = ws.cell(1, col_idx)
+        cell = ws_vacation.cell(1, col_idx)
         day_name = date.strftime('%a')
         date_str = date.strftime('%d/%m')
         cell.value = f"{day_name}\n{date_str}"
@@ -391,15 +399,15 @@ def export_schedule_to_excel(
         else:
             cell.fill = header_fill
         
-        ws.column_dimensions[cell.column_letter].width = 8
+        ws_vacation.column_dimensions[cell.column_letter].width = 8
     
     # Add "Total" column
     total_col = len(dates) + 2
-    ws.cell(1, total_col, "Total").fill = header_fill
-    ws.cell(1, total_col).font = header_font
-    ws.cell(1, total_col).alignment = center_align
-    ws.cell(1, total_col).border = border
-    ws.column_dimensions[ws.cell(1, total_col).column_letter].width = 8
+    ws_vacation.cell(1, total_col, "Total").fill = header_fill
+    ws_vacation.cell(1, total_col).font = header_font
+    ws_vacation.cell(1, total_col).alignment = center_align
+    ws_vacation.cell(1, total_col).border = border
+    ws_vacation.column_dimensions[ws_vacation.cell(1, total_col).column_letter].width = 8
     
     # Convert vacation_schedule to set of dates for faster lookup
     vacation_dates_by_employee = {
@@ -409,7 +417,7 @@ def export_schedule_to_excel(
     # Write employee rows
     for row_idx, emp in enumerate(sorted(employees, key=lambda e: e.name), start=2):
         # Employee name
-        name_cell = ws.cell(row_idx, 1, emp.name)
+        name_cell = ws_vacation.cell(row_idx, 1, emp.name)
         name_cell.border = border
         name_cell.alignment = Alignment(vertical='center')
         
@@ -417,7 +425,7 @@ def export_schedule_to_excel(
         
         # Mark vacation days
         for col_idx, date in enumerate(dates, start=2):
-            cell = ws.cell(row_idx, col_idx)
+            cell = ws_vacation.cell(row_idx, col_idx)
             cell.border = border
             cell.alignment = center_align
             
@@ -431,20 +439,20 @@ def export_schedule_to_excel(
                 cell.fill = working_fill
         
         # Total vacation days
-        total_cell = ws.cell(row_idx, total_col, vacation_count)
+        total_cell = ws_vacation.cell(row_idx, total_col, vacation_count)
         total_cell.border = border
         total_cell.alignment = center_align
         total_cell.font = Font(bold=True)
     
     # Add summary row
     summary_row = len(employees) + 3
-    ws.cell(summary_row, 1, "Employees on vacation:").font = Font(bold=True)
-    ws.cell(summary_row, 1).alignment = Alignment(vertical='center')
+    ws_vacation.cell(summary_row, 1, "Employees on vacation:").font = Font(bold=True)
+    ws_vacation.cell(summary_row, 1).alignment = Alignment(vertical='center')
     
     for col_idx, date in enumerate(dates, start=2):
         count = sum(1 for emp in employees 
                    if date in vacation_dates_by_employee.get(emp.name, set()))
-        cell = ws.cell(summary_row, col_idx, count)
+        cell = ws_vacation.cell(summary_row, col_idx, count)
         cell.alignment = center_align
         cell.font = Font(bold=True)
         cell.border = border
@@ -460,7 +468,135 @@ def export_schedule_to_excel(
             cell.fill = PatternFill(start_color=hex_color, end_color=hex_color, fill_type="solid")
     
     # Freeze panes
-    ws.freeze_panes = 'B2'
+    ws_vacation.freeze_panes = 'B2'
+    
+    # ==================================================================
+    # CREATE SHIFT COVERAGE SHEET
+    # ==================================================================
+    ws_coverage = wb.create_sheet("Shift Coverage")
+    
+    # Define additional styles for coverage sheet
+    shift_fill = PatternFill(start_color="B4C7E7", end_color="B4C7E7", fill_type="solid")
+    
+    # Write header row
+    ws_coverage.cell(1, 1, "Date").fill = header_fill
+    ws_coverage.cell(1, 1).font = header_font
+    ws_coverage.cell(1, 1).alignment = center_align
+    ws_coverage.cell(1, 1).border = border
+    ws_coverage.column_dimensions['A'].width = 12
+    
+    ws_coverage.cell(1, 2, "Day").fill = header_fill
+    ws_coverage.cell(1, 2).font = header_font
+    ws_coverage.cell(1, 2).alignment = center_align
+    ws_coverage.cell(1, 2).border = border
+    ws_coverage.column_dimensions['B'].width = 10
+    
+    ws_coverage.cell(1, 3, "Shift").fill = header_fill
+    ws_coverage.cell(1, 3).font = header_font
+    ws_coverage.cell(1, 3).alignment = center_align
+    ws_coverage.cell(1, 3).border = border
+    ws_coverage.column_dimensions['C'].width = 10
+    
+    ws_coverage.cell(1, 4, "Time").fill = header_fill
+    ws_coverage.cell(1, 4).font = header_font
+    ws_coverage.cell(1, 4).alignment = center_align
+    ws_coverage.cell(1, 4).border = border
+    ws_coverage.column_dimensions['D'].width = 15
+    
+    ws_coverage.cell(1, 5, "Required").fill = header_fill
+    ws_coverage.cell(1, 5).font = header_font
+    ws_coverage.cell(1, 5).alignment = center_align
+    ws_coverage.cell(1, 5).border = border
+    ws_coverage.column_dimensions['E'].width = 10
+    
+    ws_coverage.cell(1, 6, "Skill").fill = header_fill
+    ws_coverage.cell(1, 6).font = header_font
+    ws_coverage.cell(1, 6).alignment = center_align
+    ws_coverage.cell(1, 6).border = border
+    ws_coverage.column_dimensions['F'].width = 12
+    
+    ws_coverage.cell(1, 7, "Available").fill = header_fill
+    ws_coverage.cell(1, 7).font = header_font
+    ws_coverage.cell(1, 7).alignment = center_align
+    ws_coverage.cell(1, 7).border = border
+    ws_coverage.column_dimensions['G'].width = 10
+    
+    # Write coverage data
+    row = 2
+    for date in dates:
+        is_weekend = date.weekday() >= 5
+        requirements = coverage_weekend if is_weekend else coverage_weekday
+        day_name = date.strftime('%A')
+        date_str = date.strftime('%Y-%m-%d')
+        
+        # Get employees available on this date (not on vacation)
+        employees_available = [emp for emp in employees 
+                              if date not in vacation_dates_by_employee.get(emp.name, set())]
+        
+        # Group requirements by shift
+        from collections import defaultdict
+        shift_reqs = defaultdict(list)
+        for req in requirements:
+            shift_reqs[req.shift_id].append(req)
+        
+        # Write each shift's requirements
+        for shift_id in sorted(shift_reqs.keys()):
+            reqs = shift_reqs[shift_id]
+            shift = shifts.get(shift_id)
+            shift_time = f"{shift.start}-{shift.end}" if shift else "N/A"
+            
+            for req in reqs:
+                ws_coverage.cell(row, 1, date_str).border = border
+                ws_coverage.cell(row, 1).alignment = Alignment(horizontal='left', vertical='center')
+                
+                ws_coverage.cell(row, 2, day_name).border = border
+                ws_coverage.cell(row, 2).alignment = center_align
+                if is_weekend:
+                    ws_coverage.cell(row, 2).fill = weekend_header_fill
+                    ws_coverage.cell(row, 2).font = Font(color="FFFFFF", bold=True)
+                
+                ws_coverage.cell(row, 3, shift_id).border = border
+                ws_coverage.cell(row, 3).alignment = center_align
+                ws_coverage.cell(row, 3).fill = shift_fill
+                
+                ws_coverage.cell(row, 4, shift_time).border = border
+                ws_coverage.cell(row, 4).alignment = center_align
+                
+                ws_coverage.cell(row, 5, req.required).border = border
+                ws_coverage.cell(row, 5).alignment = center_align
+                ws_coverage.cell(row, 5).font = Font(bold=True)
+                
+                skill_text = req.required_skill if req.required_skill != "None" else "Any"
+                ws_coverage.cell(row, 6, skill_text).border = border
+                ws_coverage.cell(row, 6).alignment = center_align
+                
+                # Count available employees with required skill
+                if req.required_skill == "None":
+                    available_count = len(employees_available)
+                else:
+                    available_count = sum(1 for emp in employees_available 
+                                        if req.required_skill in emp.skills)
+                
+                ws_coverage.cell(row, 7, available_count).border = border
+                ws_coverage.cell(row, 7).alignment = center_align
+                
+                # Color code based on coverage adequacy
+                if available_count < req.required:
+                    # Red - insufficient coverage
+                    ws_coverage.cell(row, 7).fill = PatternFill(start_color="FF9999", end_color="FF9999", fill_type="solid")
+                    ws_coverage.cell(row, 7).font = Font(bold=True, color="990000")
+                elif available_count == req.required:
+                    # Yellow - exact coverage
+                    ws_coverage.cell(row, 7).fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
+                    ws_coverage.cell(row, 7).font = Font(bold=True)
+                else:
+                    # Green - good coverage
+                    ws_coverage.cell(row, 7).fill = PatternFill(start_color="99FF99", end_color="99FF99", fill_type="solid")
+                
+                row += 1
+    
+    # Freeze panes on coverage sheet
+    ws_coverage.freeze_panes = 'A2'
     
     # Save workbook
     wb.save(filename)
@@ -471,6 +607,7 @@ def export_schedule_to_excel(
 def main():
     """Main entry point."""
     employees_file = "employees.csv"
+    shifts_file = "shifts.csv"
     coverage_file = "coverage.csv"
     
     # Vacation period parameters
@@ -502,6 +639,11 @@ def main():
     print(f"Loading employees from: {employees_file}")
     employees = load_employees(employees_file)
     print(f"  Loaded {len(employees)} employees")
+    
+    print(f"Loading shift definitions from: {shifts_file}")
+    from vacation_calculator import load_shifts  # Import from the other module
+    shifts = load_shifts(shifts_file)
+    print(f"  Loaded {len(shifts)} shift types")
     
     print(f"Loading coverage requirements from: {coverage_file}")
     coverage = load_coverage(coverage_file)
@@ -537,6 +679,9 @@ def main():
     excel_file = export_schedule_to_excel(
         vacation_schedule,
         employees,
+        coverage_weekday,
+        coverage_weekend,
+        shifts,
         start_date,
         num_weeks,
         "vacation_schedule.xlsx"
@@ -546,6 +691,7 @@ def main():
         print(f"✓ Excel schedule saved to: {excel_file}")
     else:
         print("✗ Could not generate Excel file (openpyxl not available)")
+
 
 
 

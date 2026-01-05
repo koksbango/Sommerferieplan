@@ -73,12 +73,25 @@ Generating Excel schedule...
 ✓ Excel schedule saved to: vacation_schedule.xlsx
 ```
 
-The scheduler automatically generates an **Excel file** (`vacation_schedule.xlsx`) with a visual calendar showing:
-- Each employee's vacation days marked with "V"
-- Color-coded vacation (green) vs working days (beige)
-- Weekend dates highlighted in red
-- Total vacation days per employee
-- Daily count of employees on vacation
+The scheduler automatically generates an **Excel file** (`vacation_schedule.xlsx`) with two sheets:
+
+**Sheet 1: Vacation Schedule**
+- Visual calendar with each employee in a row and dates in columns
+- "V" marks vacation days (green background)
+- Working days have beige background
+- Weekend dates highlighted with red headers
+- Total vacation days per employee in rightmost column
+- Bottom row shows daily count of employees on vacation
+
+**Sheet 2: Shift Coverage**
+- Daily shift requirements for the entire 5-week period
+- Shows for each date:
+  - Day of week (weekends highlighted)
+  - Shift type and time range
+  - Required number of employees
+  - Required skill (or "Any" for general coverage)
+  - Available employees (color-coded: red=insufficient, yellow=exact, green=good)
+- Helps identify coverage gaps when employees are on vacation
 
 ### Vacation Calculator
 
