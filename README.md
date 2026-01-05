@@ -1,14 +1,19 @@
 # Sommerferieplan
 
-A Python script that calculates possible summer vacation days for all employees in ATC (Air Traffic Control).
+A Python script that calculates and optimizes summer vacation schedules for ATC (Air Traffic Control) employees.
 
 ## Overview
 
-This tool helps plan summer vacation schedules by calculating the maximum number of vacation days each employee can take while ensuring all shift requirements are met. The calculator considers:
+This tool helps plan summer vacation schedules by:
+- **vacation_calculator.py**: Analyzes coverage requirements and calculates theoretical maximum vacation days
+- **vacation_scheduler.py**: Optimizes vacation distribution across employees while maintaining shift coverage
 
+The scheduler considers:
 - Employee skills and qualifications
-- Daily shift requirements by skill type
-- Minimum coverage requirements for each skill
+- Daily shift requirements by skill type  
+- Minimum coverage requirements for each shift
+- Weekday vs weekend coverage differences
+- Fair distribution of vacation days
 
 ## Requirements
 
@@ -25,31 +30,53 @@ cd Sommerferieplan
 
 ## Usage
 
-### Basic Usage
+### Vacation Scheduler (Recommended)
 
-Run the script with default CSV files (`employees.csv`, `shifts.csv`, and `coverage.csv`):
+Optimizes vacation allocation to maximize days while maintaining coverage:
+
+```bash
+python3 vacation_scheduler.py
+```
+
+**Custom parameters:**
+```bash
+python3 vacation_scheduler.py employees.csv coverage.csv 2024-06-01 6 21
+```
+- `employees.csv`: Employee data file
+- `coverage.csv`: Coverage requirements file  
+- `2024-06-01`: Start date (YYYY-MM-DD)
+- `6`: Number of weeks
+- `21`: Target vacation days per employee
+
+**Example output:**
+```
+Vacation capacity:
+  Weekdays: up to 39 employees on vacation (need 35 working)
+  Weekends: up to 48 employees on vacation (need 26 working)
+
+Theoretical maximum:
+  Total vacation-day capacity: 1746
+  If distributed equally: 23 days per employee
+
+Results:
+  Total vacation days allocated: 1554
+  Average per employee: 21.0 days
+  Minimum: 21 days
+  Maximum: 21 days
+```
+
+### Vacation Calculator
+
+Analyzes coverage requirements and shows theoretical maximums:
 
 ```bash
 python3 vacation_calculator.py
 ```
 
-### Custom CSV Files
-
-Specify custom input files:
-
-```bash
-python3 vacation_calculator.py path/to/employees.csv path/to/shifts.csv path/to/coverage.csv
-```
-
-### Custom Vacation Period
-
-Specify custom vacation period dates (in YYYY-MM-DD format):
-
+**Custom parameters:**
 ```bash
 python3 vacation_calculator.py employees.csv shifts.csv coverage.csv 2024-06-01 2024-08-31
 ```
-
-The default vacation period is June 1, 2024 to August 31, 2024 (92 days).
 
 ## Input File Formats
 
@@ -129,20 +156,23 @@ Maximum vacation days per employee:
 
 The vacation period is currently set to June 1 - August 31, 2024 (92 days). You can modify the `start_date` and `end_date` variables in the `main()` function to change this period.
 
+## Key Insights
+
+With the provided data (74 employees, 35 weekday positions, 26 weekend positions):
+- **5 weeks**: Maximum ~19 days per employee
+- **6 weeks**: Can achieve 21 days for all employees  
+- **Weekday capacity**: Up to 39 employees can be on vacation
+- **Weekend capacity**: Up to 48 employees can be on vacation
+
 ## Algorithm
 
-The calculator uses a greedy approach:
+The vacation scheduler uses an iterative fair allocation algorithm:
 
-1. For each employee, iterate through all days in the vacation period (default: June 1 - August 31)
-2. For each day, determine if it's a weekday or weekend
-3. Check if shift coverage requirements can still be met without that employee
-4. For each shift and skill requirement:
-   - If the requirement is for a specific skill, count employees with that skill
-   - If the requirement is "None" (general coverage), count all available employees
-5. Count the days where the employee's absence doesn't violate coverage requirements
-6. The count represents the maximum vacation days that employee can take
-
-**Note**: The results show theoretical maximums. In practice, employees cannot take all their possible days simultaneously. Actual vacation scheduling requires coordination to ensure coverage.
+1. Calculate vacation capacity for each day type (weekday/weekend)
+2. Iteratively assign vacation days to employees with the fewest days assigned
+3. Ensure coverage requirements are met for each day (total employees and skill requirements)
+4. Continue until target is reached or no more vacation can be assigned
+5. Result: Fair distribution with minimal variance between employees
 
 ## Example Files
 
