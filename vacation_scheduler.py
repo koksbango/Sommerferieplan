@@ -438,7 +438,7 @@ def calculate_shift_hours(shift_id: str, shifts: Dict[str, 'Shift']) -> float:
         
         duration_mins = end_mins - start_mins
         return duration_mins / 60.0
-    except:
+    except (ValueError, IndexError, AttributeError):
         return 8.0  # Default on error
 
 
@@ -469,8 +469,6 @@ def assign_shifts_to_employees(
     Returns:
         Dict mapping employee name -> Dict mapping date -> shift assignment
     """
-    from collections import defaultdict
-    
     # Initialize shift assignments
     shift_assignments = {emp.name: {} for emp in employees}
     
