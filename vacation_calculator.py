@@ -473,6 +473,158 @@ def print_results(vacation_days: Dict[str, int], total_days: int, employees: Lis
     print()
 
 
+def analyze_vacation_feasibility(
+    employees: List[Employee],
+    coverage_weekday: List[CoverageRequirement],
+    coverage_weekend: List[CoverageRequirement],
+    shifts: Dict[str, Shift],
+    start_date: datetime,
+    period_days: int = 35
+) -> Dict:
+    """Analyze maximum feasible consecutive vacation days.
+    
+    This function tests different vacation lengths to find the maximum that's
+    feasible while maintaining 100% coverage and respecting working constraints.
+    
+    Args:
+        employees: List of all employees
+        coverage_weekday: Weekday coverage requirements
+        coverage_weekend: Weekend coverage requirements
+        shifts: Dict of shift definitions
+        start_date: Start date of vacation period
+        period_days: Length of vacation period in days (default 35 for 5 weeks)
+    
+    Returns:
+        Dict with analysis results
+    """
+    total_employees = len(employees)
+    group_size = total_employees // 2
+    
+    # Calculate weekday and weekend position needs
+    weekday_total = sum(req.required for req in coverage_weekday)
+    weekend_total = sum(req.required for req in coverage_weekend)
+    
+    # Count weekdays and weekends in period
+    weekdays = 0
+    weekends = 0
+    for i in range(period_days):
+        date = start_date + timedelta(days=i)
+        if date.weekday() < 5:  # Monday=0, Friday=4
+            weekdays += 1
+        else:
+            weekends += 1
+    
+    print("\n" + "=" * 70)
+    print("FEASIBILITY ANALYSIS FOR CONSECUTIVE VACATION DAYS")
+    print("=" * 70)
+    print(f"\nVacation period: {start_date.date()} to {(start_date + timedelta(days=period_days-1)).date()}")
+    print(f"Period length: {period_days} days ({weekdays} weekdays, {weekends} weekends)")
+    print(f"\nTotal employees: {total_employees}")
+    print(f"Two-group strategy: {group_size} employees per group")
+    print(f"\nCoverage requirements:")
+    print(f"  Weekdays: {weekday_total} positions needed, {group_size - weekday_total} can be on vacation")
+    print(f"  Weekends: {weekend_total} positions needed, {group_size - weekend_total} can be on vacation")
+    
+    # Calculate average hours per employee if evenly distributed
+    # Each group works for half the period (period_days / 2 days)
+    work_days_per_employee = period_days // 2
+    
+    # Estimate shifts per employee
+    # Assume ~8 hour shifts, and employees work 37-48 hours per week
+    avg_target_hours = sum(e.weekly_target_hours for e in employees) / len(employees)
+    avg_max_hours = sum(e.max_hours_per_week for e in employees) / len(employees)
+    
+    weeks = period_days / 7.0
+    target_hours_total = avg_target_hours * weeks
+    max_hours_total = avg_max_hours * weeks
+    
+    print(f"\nWorking hour analysis (per employee in working group):")
+    print(f"  Working period: ~{work_days_per_employee} days (while group works)")
+    print(f"  Average weekly_target_hours: {avg_target_hours:.1f}h")
+    print(f"  Average max_hours_per_week: {avg_max_hours:.1f}h")
+    print(f"  Target hours over {weeks:.1f} weeks: {target_hours_total:.1f}h")
+    print(f"  Maximum hours over {weeks:.1f} weeks: {max_hours_total:.1f}h")
+    
+    # Test different vacation lengths
+    print(f"\n" + "-" * 70)
+    print("TESTING VACATION LENGTH SCENARIOS")
+    print("-" * 70)
+    
+    results = {}
+    for vacation_days in range(21, 13, -1):  # Test from 21 down to 14 days
+        work_days = period_days - vacation_days
+        
+        # Calculate required shifts per working day
+        avg_shifts_per_day = (weekday_total * weekdays + weekend_total * weekends) / period_days
+        total_shift_slots = int(avg_shifts_per_day * work_days * 2)  # *2 because each group works half
+        shifts_per_employee = total_shift_slots / total_employees
+        
+        # Estimate hours assuming 8-hour shifts
+        est_hours_per_employee = shifts_per_employee * 8
+        
+        # Check if within reasonable bounds
+        within_target = est_hours_per_employee <= target_hours_total * 1.1  # 10% over target
+        within_max = est_hours_per_employee <= max_hours_total * 1.05  # 5% over max
+        
+        feasibility = "FEASIBLE" if within_max else "INFEASIBLE"
+        if not within_target:
+            feasibility += " (exceeds target)"
+        
+        print(f"\n{vacation_days} consecutive days:")
+        print(f"  Work days per employee: {work_days}")
+        print(f"  Estimated shifts per employee: {shifts_per_employee:.1f}")
+        print(f"  Estimated hours per employee: {est_hours_per_employee:.1f}h")
+        print(f"  Status: {feasibility}")
+        
+        results[vacation_days] = {
+            'work_days': work_days,
+            'shifts_per_employee': shifts_per_employee,
+            'est_hours': est_hours_per_employee,
+            'within_target': within_target,
+            'within_max': within_max,
+            'feasible': within_max
+        }
+    
+    # Find maximum feasible
+    max_feasible = None
+    for days in sorted(results.keys(), reverse=True):
+        if results[days]['feasible']:
+            max_feasible = days
+            break
+    
+    print(f"\n" + "=" * 70)
+    print("FEASIBILITY SUMMARY")
+    print("=" * 70)
+    
+    if max_feasible:
+        print(f"\nMaximum feasible consecutive vacation days: {max_feasible}")
+        print(f"  Estimated work days: {results[max_feasible]['work_days']}")
+        print(f"  Estimated shifts per employee: {results[max_feasible]['shifts_per_employee']:.1f}")
+        print(f"  Estimated hours per employee: {results[max_feasible]['est_hours']:.1f}h")
+        print(f"\nCurrent scheduler allocation: 17 consecutive days")
+        if max_feasible > 17:
+            print(f"  → Potential to increase by {max_feasible - 17} days")
+        elif max_feasible == 17:
+            print(f"  → Current allocation is at maximum feasible level")
+        else:
+            print(f"  → Current allocation already exceeds estimated maximum")
+    else:
+        print("\nWARNING: No feasible solution found in tested range")
+        print("  Current 17-day allocation may be pushing constraints")
+    
+    print(f"\nNOTE: This is an estimation based on average requirements.")
+    print(f"Actual feasibility depends on:")
+    print(f"  - Specific shift patterns and time overlaps")
+    print(f"  - Individual employee max_hours_per_week limits")
+    print(f"  - 6-day consecutive work limit")
+    print(f"  - Skill matching requirements")
+    print(f"  - Daily coverage validation")
+    print(f"\nThe vacation_scheduler.py implements the full feasibility check")
+    print(f"and may find slightly different results through optimization.")
+    
+    return results
+
+
 def main():
     """Main entry point for the vacation calculator."""
     # Default file paths
@@ -480,13 +632,13 @@ def main():
     shifts_file = "shifts.csv"
     coverage_file = "coverage.csv"
     
-    # Default vacation period
-    start_year = 2024
+    # Default vacation period - now matching scheduler (weeks 27-31, 2026)
+    start_year = 2026
     start_month = 6
-    start_day = 1
-    end_year = 2024
+    start_day = 29
+    end_year = 2026
     end_month = 8
-    end_day = 31
+    end_day = 2
     
     # Parse command line arguments if provided
     if len(sys.argv) > 1:
@@ -547,18 +699,15 @@ def main():
     print(f"\nCalculating vacation days for period: {start_date.date()} to {end_date.date()}")
     print(f"Total days: {total_days}")
     
-    # Calculate vacation days
-    vacation_days = calculate_max_vacation_days(
-        employees, 
-        coverage_weekday, 
+    # Run feasibility analysis for consecutive vacation days
+    analyze_vacation_feasibility(
+        employees,
+        coverage_weekday,
         coverage_weekend,
         shifts,
         start_date,
-        end_date
+        total_days
     )
-    
-    # Print results
-    print_results(vacation_days, total_days, employees, coverage_weekday, coverage_weekend, shifts)
 
 
 if __name__ == "__main__":
