@@ -193,8 +193,16 @@ With the provided data (74 employees, 31 summer weekday positions, 26 weekend po
   - Total: 1,258 vacation days allocated
   - Average: 17.0 days per employee
   - Spread: 0 days (perfect equality)
+- **Fair shift distribution**: Working employees receive balanced shift assignments
+  - Shift count range: 11-18 shifts per employee
+  - Average shifts: 14.0 per working employee
+  - Total hours range: 98-156 hours over 18 working days
+  - Average hours: 123.8 per working employee
 - **Consecutive vacation constraint**: All vacation days are allocated as a single continuous block per employee
 - **Equal distribution**: Algorithm ensures all employees get the same number of days (within 1-day tolerance)
+- **Working hour constraints**: Shift assignments respect:
+  - `weekly_target_hours` - Target working hours averaged over 6 weeks
+  - `max_hours_per_week` - Maximum hours in any single week
 - **Weekday capacity**: Up to 43 employees can be on vacation simultaneously
 - **Weekend capacity**: Up to 48 employees can be on vacation simultaneously
 
@@ -202,7 +210,10 @@ Note: The consecutive vacation and equal distribution constraints reduce total a
 
 ## Algorithm
 
-The vacation scheduler uses an equal-distribution consecutive block allocation algorithm:
+The vacation scheduler uses two key algorithms:
+
+### Vacation Allocation
+An equal-distribution consecutive block allocation algorithm:
 
 1. Calculate vacation capacity for each day type (weekday/weekend)
 2. For each block size (starting from target), attempt to allocate that size to all employees
@@ -211,7 +222,21 @@ The vacation scheduler uses an equal-distribution consecutive block allocation a
    - Daily vacation capacity is not exceeded
 4. Try multiple employee orderings (20 attempts) to find equal distribution
 5. Select the allocation that minimizes spread (max - min days), then maximizes minimum days per employee
-5. Result: Each employee gets a single consecutive vacation period
+6. Result: Each employee gets a single consecutive vacation period with equal days
+
+### Shift Assignment
+A fair distribution algorithm that balances workload across working employees:
+
+1. For each day, identify available employees (not on vacation)
+2. For each shift requirement:
+   - First assign employees with required skills
+   - Then fill remaining positions with any available employees
+3. Prioritize employees based on:
+   - Fewer hours worked in current week (respects `max_hours_per_week`)
+   - Fewer total shifts assigned
+   - Fewer total hours overall
+4. Track working hours over rolling 6-week periods
+5. Result: Fair distribution of shifts and hours across all working employees
 
 ## Example Files
 

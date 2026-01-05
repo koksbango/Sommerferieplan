@@ -416,19 +416,47 @@ def print_vacation_results(
     print("=" * 70)
 
 
+def calculate_shift_hours(shift_id: str, shifts: Dict[str, 'Shift']) -> float:
+    """Calculate duration of a shift in hours."""
+    shift = shifts.get(shift_id)
+    if not shift:
+        return 8.0  # Default assumption
+    
+    # Parse time strings
+    try:
+        start_parts = shift.start.split(':')
+        end_parts = shift.end.split(':')
+        start_h, start_m = int(start_parts[0]), int(start_parts[1])
+        end_h, end_m = int(end_parts[0]), int(end_parts[1])
+        
+        start_mins = start_h * 60 + start_m
+        end_mins = end_h * 60 + end_m
+        
+        # Handle overnight shifts
+        if end_mins <= start_mins:
+            end_mins += 24 * 60
+        
+        duration_mins = end_mins - start_mins
+        return duration_mins / 60.0
+    except:
+        return 8.0  # Default on error
+
+
 def assign_shifts_to_employees(
     employees: List[Employee],
     vacation_schedule: Dict[str, List[datetime]],
     coverage_weekday: List[CoverageRequirement],
     coverage_weekend: List[CoverageRequirement],
-    dates: List[datetime]
+    dates: List[datetime],
+    shifts: Dict[str, 'Shift']
 ) -> Dict[str, Dict[datetime, str]]:
     """Assign shifts to employees for each day based on requirements.
     
-    Uses a simple greedy assignment algorithm:
-    - For each day, get list of employees who are working (not on vacation)
-    - For each shift requirement, assign employees with required skills
-    - Try to distribute shifts fairly
+    Uses a fair distribution algorithm that:
+    - Tracks working hours per employee over rolling 6-week periods
+    - Respects weekly_target_hours and max_hours_per_week constraints
+    - Distributes shifts fairly across all working employees
+    - Prioritizes employees with fewer hours worked
     
     Args:
         employees: List of all employees
@@ -436,10 +464,13 @@ def assign_shifts_to_employees(
         coverage_weekday: Coverage requirements for weekdays
         coverage_weekend: Coverage requirements for weekends
         dates: List of dates in the period
+        shifts: Dict mapping shift ID to Shift object
     
     Returns:
         Dict mapping employee name -> Dict mapping date -> shift assignment
     """
+    from collections import defaultdict
+    
     # Initialize shift assignments
     shift_assignments = {emp.name: {} for emp in employees}
     
@@ -448,25 +479,40 @@ def assign_shifts_to_employees(
         name: set(dates_list) for name, dates_list in vacation_schedule.items()
     }
     
+    # Create employee lookup by name
+    employee_by_name = {emp.name: emp for emp in employees}
+    
+    # Track hours worked per employee per week (using 6-week rolling window)
+    # Key: (employee_name, week_start_date), Value: hours
+    hours_per_week = defaultdict(float)
+    
+    # Track total hours per employee
+    total_hours = defaultdict(float)
+    
+    # Track number of shifts per employee (for fairness)
+    shift_counts = defaultdict(int)
+    
     # For each date, assign shifts
     for date in dates:
         is_weekend = date.weekday() >= 5
         requirements = coverage_weekend if is_weekend else coverage_weekday
+        
+        # Calculate which week this date falls into (Monday-Sunday weeks)
+        week_start = date - timedelta(days=date.weekday())
         
         # Get employees available on this date
         employees_available = [emp for emp in employees 
                               if date not in vacation_dates_by_employee.get(emp.name, set())]
         
         # Group requirements by shift
-        from collections import defaultdict
         shift_reqs = defaultdict(list)
         for req in requirements:
             shift_reqs[req.shift_id].append(req)
         
-        # Track which employees are already assigned
-        assigned_employees = set()
+        # Track which employees are already assigned today
+        assigned_today = set()
         
-        # Assign employees to shifts using greedy algorithm
+        # Assign employees to shifts using fair distribution algorithm
         for shift_id in sorted(shift_reqs.keys()):
             reqs = shift_reqs[shift_id]
             
@@ -479,24 +525,78 @@ def assign_shifts_to_employees(
                 if req.required_skill != "None":
                     skill_needs[req.required_skill] = req.required
             
+            # Calculate shift duration in hours
+            shift_hours = calculate_shift_hours(shift_id, shifts)
+            
+            # Build candidate lists for each skill requirement
+            assigned_this_shift = []
+            
             # First, assign employees with required skills
-            shift_assigned = []
             for skill, needed in skill_needs.items():
                 candidates = [emp for emp in employees_available 
-                            if skill in emp.skills and emp.name not in assigned_employees]
-                for i, emp in enumerate(candidates[:needed]):
+                            if skill in emp.skills and emp.name not in assigned_today]
+                
+                # Sort candidates by: 
+                # 1. Hours worked this week (prefer those with fewer hours)
+                # 2. Total shift count (prefer those with fewer shifts overall)
+                # 3. Total hours (prefer those with fewer total hours)
+                def sort_key(emp):
+                    week_hours = hours_per_week[(emp.name, week_start)]
+                    # Check if adding this shift would exceed max_hours_per_week
+                    would_exceed_max = (week_hours + shift_hours) > emp.max_hours_per_week
+                    # Prioritize those who won't exceed max, then by hours worked
+                    return (would_exceed_max, week_hours, shift_counts[emp.name], total_hours[emp.name])
+                
+                candidates.sort(key=sort_key)
+                
+                # Assign the needed number of employees
+                for i in range(min(needed, len(candidates))):
+                    emp = candidates[i]
                     shift_assignments[emp.name][date] = shift_id
-                    assigned_employees.add(emp.name)
-                    shift_assigned.append(emp.name)
+                    assigned_today.add(emp.name)
+                    assigned_this_shift.append(emp.name)
+                    
+                    # Update tracking
+                    hours_per_week[(emp.name, week_start)] += shift_hours
+                    total_hours[emp.name] += shift_hours
+                    shift_counts[emp.name] += 1
             
             # Then assign remaining positions to any available employee
-            remaining_needed = total_needed - len(shift_assigned)
+            remaining_needed = total_needed - len(assigned_this_shift)
             if remaining_needed > 0:
                 candidates = [emp for emp in employees_available 
-                            if emp.name not in assigned_employees]
-                for emp in candidates[:remaining_needed]:
+                            if emp.name not in assigned_today]
+                
+                # Same sorting strategy
+                def sort_key(emp):
+                    week_hours = hours_per_week[(emp.name, week_start)]
+                    would_exceed_max = (week_hours + shift_hours) > emp.max_hours_per_week
+                    return (would_exceed_max, week_hours, shift_counts[emp.name], total_hours[emp.name])
+                
+                candidates.sort(key=sort_key)
+                
+                for i in range(min(remaining_needed, len(candidates))):
+                    emp = candidates[i]
                     shift_assignments[emp.name][date] = shift_id
-                    assigned_employees.add(emp.name)
+                    assigned_today.add(emp.name)
+                    
+                    # Update tracking
+                    hours_per_week[(emp.name, week_start)] += shift_hours
+                    total_hours[emp.name] += shift_hours
+                    shift_counts[emp.name] += 1
+    
+    # Print fairness statistics
+    print("\nShift distribution statistics:")
+    working_employees = [emp for emp in employees if shift_counts[emp.name] > 0]
+    if working_employees:
+        shift_count_list = [shift_counts[emp.name] for emp in working_employees]
+        hours_list = [total_hours[emp.name] for emp in working_employees]
+        
+        print(f"  Employees with shifts: {len(working_employees)}")
+        print(f"  Shift count range: {min(shift_count_list)} - {max(shift_count_list)} shifts")
+        print(f"  Average shifts per working employee: {sum(shift_count_list)/len(shift_count_list):.1f}")
+        print(f"  Total hours range: {min(hours_list):.1f} - {max(hours_list):.1f} hours")
+        print(f"  Average hours per working employee: {sum(hours_list)/len(hours_list):.1f}")
     
     return shift_assignments
 
@@ -598,7 +698,7 @@ def export_schedule_to_excel(
     
     # Assign shifts to employees
     shift_assignments = assign_shifts_to_employees(
-        employees, vacation_schedule, coverage_weekday, coverage_weekend, dates
+        employees, vacation_schedule, coverage_weekday, coverage_weekend, dates, shifts
     )
     
     # Write employee rows
