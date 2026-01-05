@@ -457,7 +457,8 @@ def optimize_vacation_schedule(
                     # Keep the best schedule (prioritize low spread, then high min_days, then total_days)
                     if (spread < best_max_spread or
                         (spread == best_max_spread and min_days > best_min_days) or
-                            (spread == best_max_spread and min_days == best_min_days and total_days > best_total_days)):
+                        (spread == best_max_spread and min_days == best_min_days and
+                         total_days > best_total_days)):
                         best_max_spread = spread
                         best_min_days = min_days
                         best_total_days = total_days
@@ -1599,8 +1600,8 @@ def export_schedule_to_excel(
                                if date not in vacation_dates_by_employee.get(emp.name, set())]
 
         # Group requirements by shift
-        from collections import defaultdict as dd
-        shift_reqs = dd(list)
+        from collections import defaultdict as default_dict
+        shift_reqs = default_dict(list)
         for req in requirements:
             shift_reqs[req.shift_id].append(req)
 
