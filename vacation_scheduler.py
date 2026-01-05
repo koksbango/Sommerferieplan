@@ -10,7 +10,7 @@ import csv
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple, Optional
 try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -325,7 +325,7 @@ def export_schedule_to_excel(
     start_date: datetime,
     num_weeks: int,
     filename: str = "vacation_schedule.xlsx"
-) -> str:
+) -> Optional[str]:
     """Export vacation schedule to Excel file with visual calendar view.
     
     Args:
@@ -336,7 +336,7 @@ def export_schedule_to_excel(
         filename: Output filename (default: vacation_schedule.xlsx)
     
     Returns:
-        Path to the generated file
+        Path to the generated file, or None if openpyxl is not available
     """
     if not OPENPYXL_AVAILABLE:
         print("\nWarning: openpyxl not available. Cannot generate Excel file.")
@@ -451,9 +451,11 @@ def export_schedule_to_excel(
         
         # Color code based on count
         if count > 0:
-            # Gradient from light to dark green
-            intensity = min(count / 10, 1.0)
-            green_val = int(144 + (0 - 144) * intensity)
+            # Gradient from light green (90EE90) to darker green
+            intensity = min(count / 10.0, 1.0)
+            # Calculate green component: 238 (0xEE) down to 144 (0x90)
+            green_val = int(238 - (238 - 144) * intensity)
+            green_val = max(144, min(238, green_val))  # Clamp to valid range
             hex_color = f"90{green_val:02X}90"
             cell.fill = PatternFill(start_color=hex_color, end_color=hex_color, fill_type="solid")
     
