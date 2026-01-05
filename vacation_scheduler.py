@@ -1249,28 +1249,17 @@ def export_schedule_to_excel(
         is_weekend = date.weekday() >= 5
         requirements = coverage_weekend if is_weekend else coverage_weekday
         
-        # Calculate total required positions and assigned positions for this day
-        total_required = 0
-        total_assigned = 0
+        # Calculate total required positions for this day
+        total_required = sum(req.required for req in requirements)
         
-        # Count requirements by shift and skill
-        shift_skill_required = {}
-        for req in requirements:
-            key = (req.shift_id, req.required_skill)
-            shift_skill_required[key] = req.required
-            total_required += req.required
-        
-        # Count actual assignments
+        # Count actual assignments - each employee should only be counted once
+        employees_assigned = set()
         for emp in employees:
             assigned_shift = shift_assignments[emp.name].get(date, "")
             if assigned_shift:
-                # Find matching requirement for this shift
-                for (shift_id, required_skill), required_count in shift_skill_required.items():
-                    if shift_id == assigned_shift:
-                        # Check if employee has required skill (or if no specific skill required)
-                        if required_skill == "None" or required_skill in emp.skills:
-                            total_assigned += 1
-                            break
+                employees_assigned.add(emp.name)
+        
+        total_assigned = len(employees_assigned)
         
         # Calculate coverage percentage
         if total_required > 0:
