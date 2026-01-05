@@ -729,9 +729,11 @@ def assign_shifts_to_employees(
                 candidates = [emp for emp in employees_available 
                             if skill in emp.skills and emp.name not in assigned_today]
                 
-                # Sort candidates using helper function
+                # Sort candidates by fairness priority
+                # Use tuple comparison for deterministic ordering
                 sort_key_func = create_sort_key(hours_per_week, week_start, shift_hours, shift_counts, total_hours)
-                candidates.sort(key=sort_key_func)
+                # Add employee name as final tiebreaker for consistency
+                candidates.sort(key=lambda emp: (sort_key_func(emp), emp.name))
                 
                 # Assign the needed number of employees
                 for i in range(min(needed, len(candidates))):
@@ -753,7 +755,7 @@ def assign_shifts_to_employees(
                 
                 # Sort candidates using same strategy
                 sort_key_func = create_sort_key(hours_per_week, week_start, shift_hours, shift_counts, total_hours)
-                candidates.sort(key=sort_key_func)
+                candidates.sort(key=lambda emp: (sort_key_func(emp), emp.name))
                 
                 for i in range(min(remaining_needed, len(candidates))):
                     emp = candidates[i]
