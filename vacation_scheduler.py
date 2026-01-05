@@ -828,32 +828,54 @@ def assign_shifts_to_employees(
         Dict mapping employee name -> Dict mapping date -> shift assignment
     """
     # Helper functions for candidate filtering and sorting
-    def get_valid_candidates(available_employees, week_start, shift_hours, assigned_today, current_date, required_skill=None):
-        """Filter employees who can take this shift without exceeding constraints.
+    def get_valid_candidates_tiered(available_employees, week_start, shift_hours, assigned_today, current_date, required_skill=None):
+        """Filter employees by tier to ensure coverage while respecting constraints.
         
-        Constraints checked:
-        - Not already assigned today
-        - Has required skill (if specified)
-        - Would not exceed max_hours_per_week
-        - Would not exceed max consecutive working days (6 days)
+        Returns candidates in three tiers:
+        - Tier 1 (strict): Below target hours, under max, <6 consecutive days
+        - Tier 2 (moderate): Under max hours and <6 days, may exceed target
+        - Tier 3 (emergency): Any available employee (coverage takes priority)
+        
+        Args:
+            available_employees: List of employees not on vacation
+            week_start: Start of the week for hours calculation
+            shift_hours: Hours for this shift
+            assigned_today: Set of employees already assigned today
+            current_date: Current date
+            required_skill: Required skill (or None for any skill)
+            
+        Returns:
+            Tuple of (tier1_candidates, tier2_candidates, tier3_candidates)
         """
-        candidates = []
+        tier1 = []  # Strict: below target, under max, <6 consecutive days
+        tier2 = []  # Moderate: under max and <6 days (may exceed target)
+        tier3 = []  # Emergency: any available employee
+        
         for emp in available_employees:
             if emp.name in assigned_today:
                 continue
             if required_skill and required_skill not in emp.skills:
                 continue
+                
             week_hours = hours_per_week[(emp.name, week_start)]
-            if week_hours + shift_hours > emp.max_hours_per_week:
-                continue  # Skip employees who would exceed max weekly hours
-            
-            # Check consecutive working days (limit to 6 consecutive days max)
             consecutive_days = consecutive_work_days.get(emp.name, 0)
-            if consecutive_days >= 6:
-                continue  # Skip employees who have worked 6+ consecutive days
             
-            candidates.append(emp)
-        return candidates
+            # Tier 3: Always available (coverage priority)
+            tier3.append(emp)
+            
+            # Check if under max hours and consecutive days
+            under_max_hours = (week_hours + shift_hours) <= emp.max_hours_per_week
+            under_consecutive_limit = consecutive_days < 6
+            
+            if under_max_hours and under_consecutive_limit:
+                # Check if also under target hours
+                under_target_hours = (week_hours + shift_hours) <= emp.weekly_target_hours
+                if under_target_hours:
+                    tier1.append(emp)  # Tier 1: all constraints met
+                else:
+                    tier2.append(emp)  # Tier 2: meets hard limits, exceeds soft target
+        
+        return tier1, tier2, tier3
     
     def create_sort_key_for_employee(emp, week_start, shift_hours):
         """Create a sort key for fair employee assignment."""
@@ -927,18 +949,36 @@ def assign_shifts_to_employees(
             
             # First, assign employees with required skills
             for skill, needed in skill_needs.items():
-                # Get valid candidates with required skill
-                candidates = get_valid_candidates(employees_available, week_start, shift_hours, assigned_today, date, skill)
+                # Get valid candidates with required skill in tiers
+                tier1, tier2, tier3 = get_valid_candidates_tiered(employees_available, week_start, shift_hours, assigned_today, date, skill)
                 
-                # Sort candidates by fairness priority (prefer those below target hours)
-                candidates.sort(key=lambda emp: create_sort_key_for_employee(emp, week_start, shift_hours))
+                # Sort each tier by fairness priority (prefer those below target hours)
+                tier1.sort(key=lambda emp: create_sort_key_for_employee(emp, week_start, shift_hours))
+                tier2.sort(key=lambda emp: create_sort_key_for_employee(emp, week_start, shift_hours))
+                tier3.sort(key=lambda emp: create_sort_key_for_employee(emp, week_start, shift_hours))
                 
-                # Assign the needed number of employees
-                for i in range(min(needed, len(candidates))):
-                    emp = candidates[i]
+                # Try to fill from tier 1 first, then tier 2, then tier 3
+                candidates = tier1 + tier2 + tier3
+                
+                # Assign the needed number of employees (MUST fill all positions)
+                assigned_count = 0
+                used_tier = 1
+                for i, emp in enumerate(candidates):
+                    if assigned_count >= needed:
+                        break
+                    
+                    # Track which tier we're using
+                    if i >= len(tier1) + len(tier2):
+                        if used_tier < 3:
+                            print(f"  WARNING: Using emergency tier for {shift_id} on {date.strftime('%Y-%m-%d')} (skill: {skill})")
+                            used_tier = 3
+                    elif i >= len(tier1):
+                        used_tier = 2
+                    
                     shift_assignments[emp.name][date] = shift_id
                     assigned_today.add(emp.name)
                     assigned_this_shift.append(emp.name)
+                    assigned_count += 1
                     
                     # Update tracking
                     hours_per_week[(emp.name, week_start)] += shift_hours
@@ -951,20 +991,42 @@ def assign_shifts_to_employees(
                     else:
                         consecutive_work_days[emp.name] = 1
                     last_work_date[emp.name] = date
+                
+                # Check if we couldn't fill all positions
+                if assigned_count < needed:
+                    print(f"  ERROR: Could not fill all {needed} positions for {shift_id} on {date.strftime('%Y-%m-%d')} (skill: {skill}). Only filled {assigned_count}.")
             
             # Then assign remaining positions to any available employee
             remaining_needed = total_needed - len(assigned_this_shift)
             if remaining_needed > 0:
-                # Get valid candidates (any skill)
-                candidates = get_valid_candidates(employees_available, week_start, shift_hours, assigned_today, date)
+                # Get valid candidates (any skill) in tiers
+                tier1, tier2, tier3 = get_valid_candidates_tiered(employees_available, week_start, shift_hours, assigned_today, date)
                 
-                # Sort candidates using same strategy
-                candidates.sort(key=lambda emp: create_sort_key_for_employee(emp, week_start, shift_hours))
+                # Sort each tier
+                tier1.sort(key=lambda emp: create_sort_key_for_employee(emp, week_start, shift_hours))
+                tier2.sort(key=lambda emp: create_sort_key_for_employee(emp, week_start, shift_hours))
+                tier3.sort(key=lambda emp: create_sort_key_for_employee(emp, week_start, shift_hours))
                 
-                for i in range(min(remaining_needed, len(candidates))):
-                    emp = candidates[i]
+                # Try to fill from tier 1 first, then tier 2, then tier 3
+                candidates = tier1 + tier2 + tier3
+                
+                assigned_count = 0
+                used_tier = 1
+                for i, emp in enumerate(candidates):
+                    if assigned_count >= remaining_needed:
+                        break
+                    
+                    # Track which tier we're using
+                    if i >= len(tier1) + len(tier2):
+                        if used_tier < 3:
+                            print(f"  WARNING: Using emergency tier for {shift_id} on {date.strftime('%Y-%m-%d')}")
+                            used_tier = 3
+                    elif i >= len(tier1):
+                        used_tier = 2
+                    
                     shift_assignments[emp.name][date] = shift_id
                     assigned_today.add(emp.name)
+                    assigned_count += 1
                     
                     # Update tracking
                     hours_per_week[(emp.name, week_start)] += shift_hours
@@ -977,6 +1039,10 @@ def assign_shifts_to_employees(
                     else:
                         consecutive_work_days[emp.name] = 1
                     last_work_date[emp.name] = date
+                
+                # Check if we couldn't fill all positions
+                if assigned_count < remaining_needed:
+                    print(f"  ERROR: Could not fill all {remaining_needed} remaining positions for {shift_id} on {date.strftime('%Y-%m-%d')}. Only filled {assigned_count}.")
     
     # Post-processing: Rebalance shifts for better fairness
     print("\nRebalancing shifts for improved fairness...")
