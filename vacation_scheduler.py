@@ -1600,8 +1600,7 @@ def export_schedule_to_excel(
                                if date not in vacation_dates_by_employee.get(emp.name, set())]
 
         # Group requirements by shift
-        from collections import defaultdict as default_dict
-        shift_reqs = default_dict(list)
+        shift_reqs = defaultdict(list)
         for req in requirements:
             shift_reqs[req.shift_id].append(req)
 
