@@ -15,6 +15,8 @@ The scheduler considers:
 - Weekday vs weekend coverage differences
 - **Equal distribution** - all employees get the same vacation days (within 1-day tolerance)
 - **Consecutive vacation periods** - each employee's vacation is allocated as a single continuous block
+- **Two-group split** - employees are divided into two equal groups, one taking vacation in the first half of the period, the other in the second half
+- **Fair shift distribution** - shifts are distributed equitably among working employees, respecting working hour constraints
 
 ## Requirements
 
@@ -64,11 +66,29 @@ Theoretical maximum:
   Total vacation-day capacity: 1555
   If distributed equally: 21 days per employee
 
+Allocating consecutive vacation blocks with equal distribution...
+  Strategy: Split employees into two equal groups
+  Group 1: 37 employees
+  Group 2: 37 employees
+
+  Analyzing vacation groups...
+  Group 1 (vacation in first half): 37 employees
+  Group 2 (vacation in second half): 37 employees
+  First vacation starts: 2024-06-01
+  Last vacation starts: 2024-06-18
+
 Results:
-  Total vacation days allocated: 1554
-  Average per employee: 21.0 days
-  Minimum: 21 days
-  Maximum: 21 days
+  Total vacation days allocated: 1258
+  Average per employee: 17.0 days
+  Minimum: 17 days
+  Maximum: 17 days
+
+Shift distribution statistics:
+  Employees with shifts: 74
+  Shift count range: 9 - 15 shifts
+  Average shifts per working employee: 14.0
+  Total hours range: 93.0 - 135.0 hours
+  Average hours per working employee: 123.8
 
 Generating Excel schedule...
 ✓ Excel schedule saved to: vacation_schedule.xlsx

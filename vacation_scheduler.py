@@ -206,6 +206,7 @@ def optimize_vacation_schedule(
         print(f"  Consider extending the vacation period or reducing the target.")
     
     print("\nAllocating consecutive vacation blocks with equal distribution...")
+    print("  Strategy: Split employees into two equal groups")
     
     # Initialize vacation assignments
     vacation_schedule = {emp.name: [] for emp in employees}
@@ -213,10 +214,16 @@ def optimize_vacation_schedule(
     # Track who's on vacation each day
     vacation_by_date = {date: set() for date in dates}
     
-    # Modified allocation algorithm: assign CONSECUTIVE vacation blocks to employees
-    # Ensure all employees get equal days (within 1 day difference)
+    # Modified allocation algorithm: Split employees into TWO EQUAL GROUPS
+    # Group 1 takes vacation in first half, Group 2 in second half
     import random
     random.seed(42)  # For reproducibility
+    
+    num_employees = len(employees)
+    group_size = num_employees // 2  # Split into two equal groups
+    
+    print(f"  Group 1: {group_size} employees")
+    print(f"  Group 2: {num_employees - group_size} employees")
     
     best_schedule = None
     best_min_days = 0
@@ -238,18 +245,78 @@ def optimize_vacation_schedule(
             random.seed(42 + attempt)  # Different seed for each attempt
             random.shuffle(employees_ordered)
         
+        # Split into two groups
+        group1 = employees_ordered[:group_size]
+        group2 = employees_ordered[group_size:]
+        
+        # Calculate midpoint of the period
+        mid_point = len(dates) // 2
+        
+        # Calculate maximum block size that can fit in each half
+        max_block_first_half = mid_point
+        max_block_second_half = len(dates) - mid_point
+        
         # Try to allocate equal blocks to all employees
-        # Start with a target block size that should work for everyone
-        for target_block_size in range(target_days_per_employee, max(6, target_days_per_employee - 8), -1):
+        # Start with largest block size that fits in the smaller half
+        max_block_size = min(max_block_first_half, max_block_second_half)
+        
+        for target_block_size in range(min(target_days_per_employee, max_block_size), max(6, max_block_size - 8), -1):
             temp_schedule = {emp.name: [] for emp in employees}
             temp_vacation_by_date = {date: set() for date in dates}
             
-            for emp in employees_ordered:
-                # Find a consecutive block of exactly target_block_size
+            # Process Group 1 first (first half of period)
+            for emp in group1:
+                # Find a consecutive block of exactly target_block_size in FIRST HALF
                 best_block = None
                 
-                # Try different start positions
-                for start_idx in range(len(dates) - target_block_size + 1):
+                # Try different start positions in first half
+                for start_idx in range(0, mid_point - target_block_size + 1):
+                    end_idx = start_idx + target_block_size
+                    candidate_block = dates[start_idx:end_idx]
+                    
+                    # Check if this employee can take vacation on all these days
+                    can_take_all = True
+                    for date in candidate_block:
+                        if emp.name in temp_vacation_by_date[date]:
+                            can_take_all = False
+                            break
+                        
+                        is_weekend = date.weekday() in (5, 6)
+                        max_vacation_today = max_vacation_weekend if is_weekend else max_vacation_weekday
+                        requirements = coverage_weekend if is_weekend else coverage_weekday
+                        _, skill_requirements = calculate_min_employees_needed(requirements)
+                        
+                        current_vacation_count = len(temp_vacation_by_date[date])
+                        if current_vacation_count >= max_vacation_today:
+                            can_take_all = False
+                            break
+                        
+                        employees_working = [e for e in employees 
+                                            if e.name not in temp_vacation_by_date[date] and e.name != emp.name]
+                        
+                        total_needed = weekday_total if not is_weekend else weekend_total
+                        
+                        if not can_cover_with_employees(employees_working, total_needed, skill_requirements):
+                            can_take_all = False
+                            break
+                    
+                    if can_take_all:
+                        best_block = candidate_block
+                        break  # Take the first available block
+                
+                # Assign the block found to this employee
+                if best_block:
+                    for date in best_block:
+                        temp_schedule[emp.name].append(date)
+                        temp_vacation_by_date[date].add(emp.name)
+            
+            # Process Group 2 (second half of period)
+            for emp in group2:
+                # Find a consecutive block of exactly target_block_size in SECOND HALF
+                best_block = None
+                
+                # Try different start positions in second half
+                for start_idx in range(mid_point, len(dates) - target_block_size + 1):
                     end_idx = start_idx + target_block_size
                     candidate_block = dates[start_idx:end_idx]
                     
@@ -320,10 +387,58 @@ def optimize_vacation_schedule(
         temp_vacation_by_date = {date: set() for date in dates}
         
         employees_ordered = sorted(employees, key=lambda e: e.name)
-        for emp in employees_ordered:
+        group1 = employees_ordered[:group_size]
+        group2 = employees_ordered[group_size:]
+        
+        # Group 1 - first half
+        for emp in group1:
             best_block = None
             for block_length in range(target_days_per_employee, 6, -1):
-                for start_idx in range(len(dates) - block_length + 1):
+                for start_idx in range(0, mid_point - block_length + 1):
+                    end_idx = start_idx + block_length
+                    candidate_block = dates[start_idx:end_idx]
+                    
+                    can_take_all = True
+                    for date in candidate_block:
+                        if emp.name in temp_vacation_by_date[date]:
+                            can_take_all = False
+                            break
+                        
+                        is_weekend = date.weekday() in (5, 6)
+                        max_vacation_today = max_vacation_weekend if is_weekend else max_vacation_weekday
+                        requirements = coverage_weekend if is_weekend else coverage_weekday
+                        _, skill_requirements = calculate_min_employees_needed(requirements)
+                        
+                        current_vacation_count = len(temp_vacation_by_date[date])
+                        if current_vacation_count >= max_vacation_today:
+                            can_take_all = False
+                            break
+                        
+                        employees_working = [e for e in employees 
+                                            if e.name not in temp_vacation_by_date[date] and e.name != emp.name]
+                        
+                        total_needed = weekday_total if not is_weekend else weekend_total
+                        
+                        if not can_cover_with_employees(employees_working, total_needed, skill_requirements):
+                            can_take_all = False
+                            break
+                    
+                    if can_take_all:
+                        best_block = candidate_block
+                        break
+                if best_block:
+                    break
+            
+            if best_block:
+                for date in best_block:
+                    temp_schedule[emp.name].append(date)
+                    temp_vacation_by_date[date].add(emp.name)
+        
+        # Group 2 - second half
+        for emp in group2:
+            best_block = None
+            for block_length in range(target_days_per_employee, 6, -1):
+                for start_idx in range(mid_point, len(dates) - block_length + 1):
                     end_idx = start_idx + block_length
                     candidate_block = dates[start_idx:end_idx]
                     
@@ -367,6 +482,31 @@ def optimize_vacation_schedule(
         vacation_by_date = temp_vacation_by_date
     
     vacation_schedule = best_schedule
+    
+    # Analyze the group split
+    if vacation_schedule:
+        print("\n  Analyzing vacation groups...")
+        
+        # Calculate start dates for each employee
+        emp_start_dates = {}
+        for emp_name, vac_dates in vacation_schedule.items():
+            if vac_dates:
+                emp_start_dates[emp_name] = min(vac_dates)
+        
+        # Sort by start date
+        sorted_by_start = sorted(emp_start_dates.items(), key=lambda x: x[1])
+        
+        mid_date_idx = len(dates) // 2
+        mid_date = dates[mid_date_idx]
+        
+        group1_actual = [name for name, start in sorted_by_start if start < mid_date]
+        group2_actual = [name for name, start in sorted_by_start if start >= mid_date]
+        
+        print(f"  Group 1 (vacation in first half): {len(group1_actual)} employees")
+        print(f"  Group 2 (vacation in second half): {len(group2_actual)} employees")
+        if sorted_by_start:
+            print(f"  First vacation starts: {sorted_by_start[0][1].strftime('%Y-%m-%d')}")
+            print(f"  Last vacation starts: {sorted_by_start[-1][1].strftime('%Y-%m-%d')}")
     
     return vacation_schedule
 
