@@ -828,8 +828,15 @@ def assign_shifts_to_employees(
         Dict mapping employee name -> Dict mapping date -> shift assignment
     """
     # Helper functions for candidate filtering and sorting
-    def get_valid_candidates(available_employees, week_start, shift_hours, assigned_today, required_skill=None):
-        """Filter employees who can take this shift without exceeding max weekly hours."""
+    def get_valid_candidates(available_employees, week_start, shift_hours, assigned_today, current_date, required_skill=None):
+        """Filter employees who can take this shift without exceeding constraints.
+        
+        Constraints checked:
+        - Not already assigned today
+        - Has required skill (if specified)
+        - Would not exceed max_hours_per_week
+        - Would not exceed max consecutive working days (6 days)
+        """
         candidates = []
         for emp in available_employees:
             if emp.name in assigned_today:
@@ -838,7 +845,13 @@ def assign_shifts_to_employees(
                 continue
             week_hours = hours_per_week[(emp.name, week_start)]
             if week_hours + shift_hours > emp.max_hours_per_week:
-                continue  # Skip employees who would exceed max
+                continue  # Skip employees who would exceed max weekly hours
+            
+            # Check consecutive working days (limit to 6 consecutive days max)
+            consecutive_days = consecutive_work_days.get(emp.name, 0)
+            if consecutive_days >= 6:
+                continue  # Skip employees who have worked 6+ consecutive days
+            
             candidates.append(emp)
         return candidates
     
@@ -868,6 +881,10 @@ def assign_shifts_to_employees(
     
     # Track number of shifts per employee (for fairness)
     shift_counts = defaultdict(int)
+    
+    # Track consecutive working days per employee
+    consecutive_work_days = defaultdict(int)
+    last_work_date = {}
     
     # For each date, assign shifts
     for date in dates:
@@ -911,7 +928,7 @@ def assign_shifts_to_employees(
             # First, assign employees with required skills
             for skill, needed in skill_needs.items():
                 # Get valid candidates with required skill
-                candidates = get_valid_candidates(employees_available, week_start, shift_hours, assigned_today, skill)
+                candidates = get_valid_candidates(employees_available, week_start, shift_hours, assigned_today, date, skill)
                 
                 # Sort candidates by fairness priority (prefer those below target hours)
                 candidates.sort(key=lambda emp: create_sort_key_for_employee(emp, week_start, shift_hours))
@@ -927,12 +944,19 @@ def assign_shifts_to_employees(
                     hours_per_week[(emp.name, week_start)] += shift_hours
                     total_hours[emp.name] += shift_hours
                     shift_counts[emp.name] += 1
+                    
+                    # Update consecutive working days
+                    if emp.name in last_work_date and (date - last_work_date[emp.name]).days == 1:
+                        consecutive_work_days[emp.name] += 1
+                    else:
+                        consecutive_work_days[emp.name] = 1
+                    last_work_date[emp.name] = date
             
             # Then assign remaining positions to any available employee
             remaining_needed = total_needed - len(assigned_this_shift)
             if remaining_needed > 0:
                 # Get valid candidates (any skill)
-                candidates = get_valid_candidates(employees_available, week_start, shift_hours, assigned_today)
+                candidates = get_valid_candidates(employees_available, week_start, shift_hours, assigned_today, date)
                 
                 # Sort candidates using same strategy
                 candidates.sort(key=lambda emp: create_sort_key_for_employee(emp, week_start, shift_hours))
@@ -946,6 +970,13 @@ def assign_shifts_to_employees(
                     hours_per_week[(emp.name, week_start)] += shift_hours
                     total_hours[emp.name] += shift_hours
                     shift_counts[emp.name] += 1
+                    
+                    # Update consecutive working days
+                    if emp.name in last_work_date and (date - last_work_date[emp.name]).days == 1:
+                        consecutive_work_days[emp.name] += 1
+                    else:
+                        consecutive_work_days[emp.name] = 1
+                    last_work_date[emp.name] = date
     
     # Post-processing: Rebalance shifts for better fairness
     print("\nRebalancing shifts for improved fairness...")
