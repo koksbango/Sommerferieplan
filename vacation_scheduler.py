@@ -220,10 +220,36 @@ def optimize_vacation_schedule(
     random.seed(42)  # For reproducibility
     
     num_employees = len(employees)
-    group_size = num_employees // 2  # Split into two equal groups
+    group_size = num_employees // 2  # Split into two groups (nearly equal if odd number)
     
-    print(f"  Group 1: {group_size} employees")
-    print(f"  Group 2: {num_employees - group_size} employees")
+    # Balance groups by weekly_target_hours
+    # Sort employees by weekly_target_hours to enable balanced distribution
+    employees_by_hours = sorted(employees, key=lambda e: e.weekly_target_hours, reverse=True)
+    
+    # Use alternating assignment to balance total hours between groups
+    # This is like dealing cards - alternate between groups to keep them balanced
+    group1_base = []
+    group2_base = []
+    for i, emp in enumerate(employees_by_hours):
+        if i % 2 == 0:
+            group1_base.append(emp)
+        else:
+            group2_base.append(emp)
+    
+    # Trim to ensure equal size (if odd number, one group gets extra person)
+    if len(group1_base) > group_size:
+        group2_base.append(group1_base.pop())
+    
+    total_hours_group1 = sum(e.weekly_target_hours for e in group1_base)
+    total_hours_group2 = sum(e.weekly_target_hours for e in group2_base)
+    
+    print(f"  Group 1: {len(group1_base)} employees (total weekly hours: {total_hours_group1})")
+    print(f"  Group 2: {len(group2_base)} employees (total weekly hours: {total_hours_group2})")
+    
+    # Calculate midpoint and block sizes once (used in main loop and fallback)
+    mid_point = len(dates) // 2
+    max_block_first_half = mid_point
+    max_block_second_half = len(dates) - mid_point
     
     best_schedule = None
     best_min_days = 0
@@ -235,26 +261,20 @@ def optimize_vacation_schedule(
         temp_schedule = {emp.name: [] for emp in employees}
         temp_vacation_by_date = {date: set() for date in dates}
         
-        # Different ordering strategies
+        # Different ordering strategies, but always use balanced groups
         if attempt == 0:
-            employees_ordered = sorted(employees, key=lambda e: e.name)
+            group1 = sorted(group1_base, key=lambda e: e.name)
+            group2 = sorted(group2_base, key=lambda e: e.name)
         elif attempt == 1:
-            employees_ordered = sorted(employees, key=lambda e: e.name, reverse=True)
+            group1 = sorted(group1_base, key=lambda e: e.name, reverse=True)
+            group2 = sorted(group2_base, key=lambda e: e.name, reverse=True)
         else:
-            employees_ordered = list(employees)
-            random.seed(42 + attempt)  # Different seed for each attempt
-            random.shuffle(employees_ordered)
-        
-        # Split into two groups
-        group1 = employees_ordered[:group_size]
-        group2 = employees_ordered[group_size:]
-        
-        # Calculate midpoint of the period
-        mid_point = len(dates) // 2
-        
-        # Calculate maximum block size that can fit in each half
-        max_block_first_half = mid_point
-        max_block_second_half = len(dates) - mid_point
+            # Shuffle within each group to try different orderings
+            group1 = list(group1_base)
+            group2 = list(group2_base)
+            random.seed(42 + attempt)
+            random.shuffle(group1)
+            random.shuffle(group2)
         
         # Try to allocate equal blocks to all employees
         # Start with largest block size that fits in the smaller half
@@ -386,9 +406,9 @@ def optimize_vacation_schedule(
         temp_schedule = {emp.name: [] for emp in employees}
         temp_vacation_by_date = {date: set() for date in dates}
         
-        employees_ordered = sorted(employees, key=lambda e: e.name)
-        group1 = employees_ordered[:group_size]
-        group2 = employees_ordered[group_size:]
+        # Use the balanced groups from above
+        group1 = sorted(group1_base, key=lambda e: e.name)
+        group2 = sorted(group2_base, key=lambda e: e.name)
         
         # Group 1 - first half
         for emp in group1:

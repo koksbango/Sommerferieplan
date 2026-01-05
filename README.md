@@ -15,7 +15,7 @@ The scheduler considers:
 - Weekday vs weekend coverage differences
 - **Equal distribution** - all employees get the same vacation days (within 1-day tolerance)
 - **Consecutive vacation periods** - each employee's vacation is allocated as a single continuous block
-- **Two-group split** - employees are divided into two equal groups, one taking vacation in the first half of the period, the other in the second half
+- **Two-group split** - employees are divided into two equal groups balanced by weekly_target_hours, one taking vacation in the first half of the period, the other in the second half
 - **Fair shift distribution** - shifts are distributed equitably among working employees, respecting working hour constraints
 
 ## Requirements
@@ -68,8 +68,8 @@ Theoretical maximum:
 
 Allocating consecutive vacation blocks with equal distribution...
   Strategy: Split employees into two equal groups
-  Group 1: 37 employees
-  Group 2: 37 employees
+  Group 1: 37 employees (total weekly hours: 1277)
+  Group 2: 37 employees (total weekly hours: 1261)
 
   Analyzing vacation groups...
   Group 1 (vacation in first half): 37 employees
