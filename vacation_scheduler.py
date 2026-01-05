@@ -418,9 +418,11 @@ def print_vacation_results(
 
 def calculate_shift_hours(shift_id: str, shifts: Dict[str, 'Shift']) -> float:
     """Calculate duration of a shift in hours."""
+    DEFAULT_SHIFT_HOURS = 8.0  # Default assumption for shift duration
+    
     shift = shifts.get(shift_id)
     if not shift:
-        return 8.0  # Default assumption
+        return DEFAULT_SHIFT_HOURS
     
     # Parse time strings
     try:
@@ -439,7 +441,7 @@ def calculate_shift_hours(shift_id: str, shifts: Dict[str, 'Shift']) -> float:
         duration_mins = end_mins - start_mins
         return duration_mins / 60.0
     except (ValueError, IndexError, AttributeError):
-        return 8.0  # Default on error
+        return DEFAULT_SHIFT_HOURS  # Default on error
 
 
 def assign_shifts_to_employees(
@@ -469,6 +471,22 @@ def assign_shifts_to_employees(
     Returns:
         Dict mapping employee name -> Dict mapping date -> shift assignment
     """
+    # Helper function to create sort key for fair distribution
+    def create_sort_key(hours_per_week, week_start, shift_hours, shift_counts, total_hours):
+        """Create a sorting key function for fair employee assignment.
+        
+        Prioritizes employees by:
+        1. Won't exceed max_hours_per_week (avoid overwork)
+        2. Fewer hours worked this week
+        3. Fewer total shifts assigned
+        4. Fewer total hours overall
+        """
+        def sort_key(emp):
+            week_hours = hours_per_week[(emp.name, week_start)]
+            would_exceed_max = (week_hours + shift_hours) > emp.max_hours_per_week
+            return (would_exceed_max, week_hours, shift_counts[emp.name], total_hours[emp.name])
+        return sort_key
+    
     # Initialize shift assignments
     shift_assignments = {emp.name: {} for emp in employees}
     
@@ -534,18 +552,9 @@ def assign_shifts_to_employees(
                 candidates = [emp for emp in employees_available 
                             if skill in emp.skills and emp.name not in assigned_today]
                 
-                # Sort candidates by: 
-                # 1. Hours worked this week (prefer those with fewer hours)
-                # 2. Total shift count (prefer those with fewer shifts overall)
-                # 3. Total hours (prefer those with fewer total hours)
-                def sort_key(emp):
-                    week_hours = hours_per_week[(emp.name, week_start)]
-                    # Check if adding this shift would exceed max_hours_per_week
-                    would_exceed_max = (week_hours + shift_hours) > emp.max_hours_per_week
-                    # Prioritize those who won't exceed max, then by hours worked
-                    return (would_exceed_max, week_hours, shift_counts[emp.name], total_hours[emp.name])
-                
-                candidates.sort(key=sort_key)
+                # Sort candidates using helper function
+                sort_key_func = create_sort_key(hours_per_week, week_start, shift_hours, shift_counts, total_hours)
+                candidates.sort(key=sort_key_func)
                 
                 # Assign the needed number of employees
                 for i in range(min(needed, len(candidates))):
@@ -565,13 +574,9 @@ def assign_shifts_to_employees(
                 candidates = [emp for emp in employees_available 
                             if emp.name not in assigned_today]
                 
-                # Same sorting strategy
-                def sort_key(emp):
-                    week_hours = hours_per_week[(emp.name, week_start)]
-                    would_exceed_max = (week_hours + shift_hours) > emp.max_hours_per_week
-                    return (would_exceed_max, week_hours, shift_counts[emp.name], total_hours[emp.name])
-                
-                candidates.sort(key=sort_key)
+                # Sort candidates using same strategy
+                sort_key_func = create_sort_key(hours_per_week, week_start, shift_hours, shift_counts, total_hours)
+                candidates.sort(key=sort_key_func)
                 
                 for i in range(min(remaining_needed, len(candidates))):
                     emp = candidates[i]
@@ -590,11 +595,15 @@ def assign_shifts_to_employees(
         shift_count_list = [shift_counts[emp.name] for emp in working_employees]
         hours_list = [total_hours[emp.name] for emp in working_employees]
         
-        print(f"  Employees with shifts: {len(working_employees)}")
-        print(f"  Shift count range: {min(shift_count_list)} - {max(shift_count_list)} shifts")
-        print(f"  Average shifts per working employee: {sum(shift_count_list)/len(shift_count_list):.1f}")
-        print(f"  Total hours range: {min(hours_list):.1f} - {max(hours_list):.1f} hours")
-        print(f"  Average hours per working employee: {sum(hours_list)/len(hours_list):.1f}")
+        # Verify lists are not empty before calculating statistics
+        if shift_count_list and hours_list:
+            print(f"  Employees with shifts: {len(working_employees)}")
+            print(f"  Shift count range: {min(shift_count_list)} - {max(shift_count_list)} shifts")
+            print(f"  Average shifts per working employee: {sum(shift_count_list)/len(shift_count_list):.1f}")
+            print(f"  Total hours range: {min(hours_list):.1f} - {max(hours_list):.1f} hours")
+            print(f"  Average hours per working employee: {sum(hours_list)/len(hours_list):.1f}")
+        else:
+            print(f"  No shifts assigned yet")
     
     return shift_assignments
 
