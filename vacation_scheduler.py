@@ -749,7 +749,7 @@ def rebalance_shift_assignments(
                     if skill_needed and skill_needed not in under_emp.skills:
                         continue
                     
-                    # Check weekly hours constraint - be more lenient as passes progress
+                    # Check weekly hours constraint against both target and max
                     week_start = date - timedelta(days=date.weekday())
                     week_dates = [d for d in dates if (d - timedelta(days=d.weekday())) == week_start]
                     
@@ -759,13 +759,15 @@ def rebalance_shift_assignments(
                     )
                     
                     shift_hours = calculate_shift_hours(shift_id, shifts)
-                    # Allow some flexibility on weekly hours in later passes
-                    max_allowed = under_emp.max_hours_per_week
-                    if pass_num > 10:
-                        max_allowed += 4  # Allow slight overtime in later passes for fairness
                     
-                    if current_week_hours + shift_hours > max_allowed:
+                    # Strict enforcement: never exceed max_hours_per_week
+                    if current_week_hours + shift_hours > under_emp.max_hours_per_week:
                         continue
+                    
+                    # Prefer not to exceed weekly_target_hours, but allow if necessary for fairness in later passes
+                    if pass_num < 20:  # First 20 passes: respect target hours
+                        if current_week_hours + shift_hours > under_emp.weekly_target_hours:
+                            continue
                     
                     # Transfer the shift
                     del shift_assignments[over_emp.name][date]
@@ -831,14 +833,16 @@ def assign_shifts_to_employees(
         
         Prioritizes employees by:
         1. Won't exceed max_hours_per_week (avoid overwork)
-        2. Fewer hours worked this week
-        3. Fewer total shifts assigned
-        4. Fewer total hours overall
+        2. Won't exceed weekly_target_hours (prefer staying at or below target)
+        3. Fewer hours worked this week
+        4. Fewer total shifts assigned
+        5. Fewer total hours overall
         """
         def sort_key(emp):
             week_hours = hours_per_week[(emp.name, week_start)]
             would_exceed_max = (week_hours + shift_hours) > emp.max_hours_per_week
-            return (would_exceed_max, week_hours, shift_counts[emp.name], total_hours[emp.name])
+            would_exceed_target = (week_hours + shift_hours) > emp.weekly_target_hours
+            return (would_exceed_max, would_exceed_target, week_hours, shift_counts[emp.name], total_hours[emp.name])
         return sort_key
     
     # Initialize shift assignments
