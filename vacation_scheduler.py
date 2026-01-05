@@ -1129,6 +1129,11 @@ def export_schedule_to_excel(
     vacation_fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
     working_fill = PatternFill(start_color="FFE4B5", end_color="FFE4B5", fill_type="solid")
     weekend_header_fill = PatternFill(start_color="FF6B6B", end_color="FF6B6B", fill_type="solid")
+    
+    # Define shift category color fills
+    day_shift_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")     # Light yellow
+    evening_shift_fill = PatternFill(start_color="C5D9F1", end_color="C5D9F1", fill_type="solid") # Light blue
+    night_shift_fill = PatternFill(start_color="D8BFD8", end_color="D8BFD8", fill_type="solid")   # Light purple/thistle
     border = Border(
         left=Side(style='thin'),
         right=Side(style='thin'),
@@ -1234,16 +1239,27 @@ def export_schedule_to_excel(
                 # Show shift assignment
                 assigned_shift = shift_assignments[emp.name].get(date, "")
                 cell.value = assigned_shift
-                cell.fill = working_fill
+                cell.fill = working_fill  # Default fill
                 if assigned_shift:
                     cell.font = Font(size=9)
                     
-                    # Calculate hours for this shift
+                    # Calculate hours for this shift and apply category-based coloring
                     if assigned_shift in shifts:
                         shift_obj = shifts[assigned_shift]
+                        
+                        # Apply color based on shift category
+                        if shift_obj.category == "Day":
+                            cell.fill = day_shift_fill
+                        elif shift_obj.category == "Evening":
+                            cell.fill = evening_shift_fill
+                        elif shift_obj.category == "Night":
+                            cell.fill = night_shift_fill
+                        else:
+                            cell.fill = working_fill  # Fallback
+                        
                         try:
-                            start_time = datetime.strptime(shift_obj.start_time, "%H:%M")
-                            end_time = datetime.strptime(shift_obj.end_time, "%H:%M")
+                            start_time = datetime.strptime(shift_obj.start, "%H:%M")
+                            end_time = datetime.strptime(shift_obj.end, "%H:%M")
                             shift_hours = (end_time - start_time).total_seconds() / 3600.0
                             if shift_hours < 0:
                                 shift_hours += 24  # Handle overnight shifts
