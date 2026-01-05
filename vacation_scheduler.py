@@ -52,6 +52,61 @@ class CoverageRequirement:
         return f"CoverageRequirement({self.day_type}, {self.shift_id}, {self.required}, {self.required_skill})"
 
 
+class Shift:
+    """Represents a shift type."""
+    
+    def __init__(self, shift_id: str, name: str, start: str, end: str, category: str):
+        self.id = shift_id
+        self.name = name
+        self.start = start
+        self.end = end
+        self.category = category
+        
+        # Parse times to minutes for easier comparison
+        start_parts = start.split(':')
+        end_parts = end.split(':')
+        self.start_minutes = int(start_parts[0]) * 60 + int(start_parts[1])
+        self.end_minutes = int(end_parts[0]) * 60 + int(end_parts[1])
+        
+        # Handle overnight shifts
+        if self.end_minutes < self.start_minutes:
+            self.end_minutes += 24 * 60
+    
+    def __repr__(self):
+        return f"Shift({self.name}, {self.start}-{self.end}, {self.category})"
+
+
+def load_shifts(filepath: str) -> Dict[str, 'Shift']:
+    """Load shift definitions from CSV file.
+    
+    Expected format:
+    id,name,start,end,cat
+    1,FD,07:00,15:15,Day
+    
+    Returns:
+        Dict mapping shift name -> Shift object
+    """
+    shifts = {}
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                shift_id = row['id'].strip()
+                name = row['name'].strip()
+                start = row['start'].strip()
+                end = row['end'].strip()
+                category = row['cat'].strip()
+                shifts[name] = Shift(shift_id, name, start, end, category)
+    except FileNotFoundError:
+        print(f"Error: File '{filepath}' not found.", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error reading shifts file: {e}", file=sys.stderr)
+        sys.exit(1)
+    
+    return shifts
+
+
 def load_employees(filepath: str) -> List[Employee]:
     """Load employees from CSV file."""
     employees = []
@@ -1614,7 +1669,6 @@ def main():
     print(f"  Loaded {len(employees)} employees")
     
     print(f"Loading shift definitions from: {shifts_file}")
-    from vacation_calculator import load_shifts  # Import from the other module
     shifts = load_shifts(shifts_file)
     print(f"  Loaded {len(shifts)} shift types")
     

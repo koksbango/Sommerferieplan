@@ -12,11 +12,11 @@ from datetime import datetime
 from vacation_scheduler import (
     load_employees,
     load_coverage,
+    load_shifts,
     get_coverage_requirements_by_type,
     optimize_vacation_schedule,
     export_schedule_to_excel
 )
-from vacation_calculator import load_shifts
 
 
 def analyze_workload(vacation_schedule, employees, num_weeks):
