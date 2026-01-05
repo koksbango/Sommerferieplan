@@ -1240,6 +1240,61 @@ def export_schedule_to_excel(
             hex_color = f"90{green_val:02X}90"
             cell.fill = PatternFill(start_color=hex_color, end_color=hex_color, fill_type="solid")
     
+    # Add coverage percentage row
+    coverage_row = summary_row + 1
+    ws_vacation.cell(coverage_row, 1, "Coverage %:").font = Font(bold=True)
+    ws_vacation.cell(coverage_row, 1).alignment = Alignment(vertical='center')
+    
+    for col_idx, date in enumerate(dates, start=2):
+        is_weekend = date.weekday() >= 5
+        requirements = coverage_weekend if is_weekend else coverage_weekday
+        
+        # Calculate total required positions and assigned positions for this day
+        total_required = 0
+        total_assigned = 0
+        
+        # Count requirements by shift and skill
+        shift_skill_required = {}
+        for req in requirements:
+            key = (req.shift_id, req.required_skill)
+            shift_skill_required[key] = req.required
+            total_required += req.required
+        
+        # Count actual assignments
+        for emp in employees:
+            assigned_shift = shift_assignments[emp.name].get(date, "")
+            if assigned_shift:
+                # Find matching requirement for this shift
+                for (shift_id, required_skill), required_count in shift_skill_required.items():
+                    if shift_id == assigned_shift:
+                        # Check if employee has required skill (or if no specific skill required)
+                        if required_skill == "None" or required_skill in emp.skills:
+                            total_assigned += 1
+                            break
+        
+        # Calculate coverage percentage
+        if total_required > 0:
+            coverage_pct = (total_assigned / total_required) * 100
+        else:
+            coverage_pct = 100.0
+        
+        cell = ws_vacation.cell(coverage_row, col_idx, f"{coverage_pct:.0f}%")
+        cell.alignment = center_align
+        cell.font = Font(bold=True)
+        cell.border = border
+        
+        # Color code based on coverage percentage
+        if coverage_pct < 80:
+            # Red - poor coverage
+            cell.fill = PatternFill(start_color="FF9999", end_color="FF9999", fill_type="solid")
+            cell.font = Font(bold=True, color="990000")
+        elif coverage_pct < 100:
+            # Yellow - partial coverage
+            cell.fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
+        else:
+            # Green - full or over coverage
+            cell.fill = PatternFill(start_color="99FF99", end_color="99FF99", fill_type="solid")
+    
     # Freeze panes
     ws_vacation.freeze_panes = 'B2'
     
