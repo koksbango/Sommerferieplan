@@ -78,6 +78,7 @@ The scheduler automatically generates an **Excel file** (`vacation_schedule.xlsx
 **Sheet 1: Vacation Schedule**
 - Visual calendar with each employee in a row and dates in columns
 - "V" marks vacation days (green background)
+- **Shift assignments** shown for working days (e.g., "DV", "A1", "FN")
 - Working days have beige background
 - Weekend dates highlighted with red headers
 - Total vacation days per employee in rightmost column

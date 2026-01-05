@@ -319,6 +319,91 @@ def print_vacation_results(
     print("=" * 70)
 
 
+def assign_shifts_to_employees(
+    employees: List[Employee],
+    vacation_schedule: Dict[str, List[datetime]],
+    coverage_weekday: List[CoverageRequirement],
+    coverage_weekend: List[CoverageRequirement],
+    dates: List[datetime]
+) -> Dict[str, Dict[datetime, str]]:
+    """Assign shifts to employees for each day based on requirements.
+    
+    Uses a simple greedy assignment algorithm:
+    - For each day, get list of employees who are working (not on vacation)
+    - For each shift requirement, assign employees with required skills
+    - Try to distribute shifts fairly
+    
+    Args:
+        employees: List of all employees
+        vacation_schedule: Dict mapping employee name -> list of vacation dates
+        coverage_weekday: Coverage requirements for weekdays
+        coverage_weekend: Coverage requirements for weekends
+        dates: List of dates in the period
+    
+    Returns:
+        Dict mapping employee name -> Dict mapping date -> shift assignment
+    """
+    # Initialize shift assignments
+    shift_assignments = {emp.name: {} for emp in employees}
+    
+    # Convert vacation schedule to sets for faster lookup
+    vacation_dates_by_employee = {
+        name: set(dates_list) for name, dates_list in vacation_schedule.items()
+    }
+    
+    # For each date, assign shifts
+    for date in dates:
+        is_weekend = date.weekday() >= 5
+        requirements = coverage_weekend if is_weekend else coverage_weekday
+        
+        # Get employees available on this date
+        employees_available = [emp for emp in employees 
+                              if date not in vacation_dates_by_employee.get(emp.name, set())]
+        
+        # Group requirements by shift
+        from collections import defaultdict
+        shift_reqs = defaultdict(list)
+        for req in requirements:
+            shift_reqs[req.shift_id].append(req)
+        
+        # Track which employees are already assigned
+        assigned_employees = set()
+        
+        # Assign employees to shifts using greedy algorithm
+        for shift_id in sorted(shift_reqs.keys()):
+            reqs = shift_reqs[shift_id]
+            
+            # Calculate total needed for this shift
+            total_needed = sum(req.required for req in reqs)
+            
+            # Get skill requirements
+            skill_needs = {}
+            for req in reqs:
+                if req.required_skill != "None":
+                    skill_needs[req.required_skill] = req.required
+            
+            # First, assign employees with required skills
+            shift_assigned = []
+            for skill, needed in skill_needs.items():
+                candidates = [emp for emp in employees_available 
+                            if skill in emp.skills and emp.name not in assigned_employees]
+                for i, emp in enumerate(candidates[:needed]):
+                    shift_assignments[emp.name][date] = shift_id
+                    assigned_employees.add(emp.name)
+                    shift_assigned.append(emp.name)
+            
+            # Then assign remaining positions to any available employee
+            remaining_needed = total_needed - len(shift_assigned)
+            if remaining_needed > 0:
+                candidates = [emp for emp in employees_available 
+                            if emp.name not in assigned_employees]
+                for emp in candidates[:remaining_needed]:
+                    shift_assignments[emp.name][date] = shift_id
+                    assigned_employees.add(emp.name)
+    
+    return shift_assignments
+
+
 def export_schedule_to_excel(
     vacation_schedule: Dict[str, List[datetime]],
     employees: List[Employee],
@@ -414,6 +499,11 @@ def export_schedule_to_excel(
         name: set(dates) for name, dates in vacation_schedule.items()
     }
     
+    # Assign shifts to employees
+    shift_assignments = assign_shifts_to_employees(
+        employees, vacation_schedule, coverage_weekday, coverage_weekend, dates
+    )
+    
     # Write employee rows
     for row_idx, emp in enumerate(sorted(employees, key=lambda e: e.name), start=2):
         # Employee name
@@ -423,7 +513,7 @@ def export_schedule_to_excel(
         
         vacation_count = 0
         
-        # Mark vacation days
+        # Mark vacation days or shift assignments
         for col_idx, date in enumerate(dates, start=2):
             cell = ws_vacation.cell(row_idx, col_idx)
             cell.border = border
@@ -435,8 +525,12 @@ def export_schedule_to_excel(
                 cell.font = Font(bold=True)
                 vacation_count += 1
             else:
-                cell.value = ""
+                # Show shift assignment
+                assigned_shift = shift_assignments[emp.name].get(date, "")
+                cell.value = assigned_shift
                 cell.fill = working_fill
+                if assigned_shift:
+                    cell.font = Font(size=9)
         
         # Total vacation days
         total_cell = ws_vacation.cell(row_idx, total_col, vacation_count)
