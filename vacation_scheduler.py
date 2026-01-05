@@ -1095,13 +1095,40 @@ def export_schedule_to_excel(
         
         ws_vacation.column_dimensions[cell.column_letter].width = 8
     
-    # Add "Total" column
-    total_col = len(dates) + 2
-    ws_vacation.cell(1, total_col, "Total").fill = header_fill
-    ws_vacation.cell(1, total_col).font = header_font
-    ws_vacation.cell(1, total_col).alignment = center_align
-    ws_vacation.cell(1, total_col).border = border
-    ws_vacation.column_dimensions[ws_vacation.cell(1, total_col).column_letter].width = 8
+    # Calculate week boundaries for hour tracking columns
+    weeks_info = []
+    current_week_start = dates[0] - timedelta(days=dates[0].weekday())  # Get Monday of first week
+    for week_num in range(num_weeks):
+        week_start = current_week_start + timedelta(weeks=week_num)
+        week_end = week_start + timedelta(days=6)
+        weeks_info.append((week_start, week_end))
+    
+    # Add weekly hours columns
+    col_offset = len(dates) + 2
+    for week_idx, (week_start, week_end) in enumerate(weeks_info):
+        week_col = col_offset + week_idx
+        cell = ws_vacation.cell(1, week_col)
+        cell.value = f"Week {week_idx + 1}\nHours"
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center_align
+        cell.border = border
+        ws_vacation.column_dimensions[cell.column_letter].width = 10
+    
+    # Add "Total Vacation" and "Total Hours" columns
+    total_vacation_col = col_offset + num_weeks
+    ws_vacation.cell(1, total_vacation_col, "Total\nVacation").fill = header_fill
+    ws_vacation.cell(1, total_vacation_col).font = header_font
+    ws_vacation.cell(1, total_vacation_col).alignment = center_align
+    ws_vacation.cell(1, total_vacation_col).border = border
+    ws_vacation.column_dimensions[ws_vacation.cell(1, total_vacation_col).column_letter].width = 10
+    
+    total_hours_col = total_vacation_col + 1
+    ws_vacation.cell(1, total_hours_col, "Total\nHours").fill = header_fill
+    ws_vacation.cell(1, total_hours_col).font = header_font
+    ws_vacation.cell(1, total_hours_col).alignment = center_align
+    ws_vacation.cell(1, total_hours_col).border = border
+    ws_vacation.column_dimensions[ws_vacation.cell(1, total_hours_col).column_letter].width = 10
     
     # Convert vacation_schedule to set of dates for faster lookup
     vacation_dates_by_employee = {
@@ -1121,6 +1148,10 @@ def export_schedule_to_excel(
         name_cell.alignment = Alignment(vertical='center')
         
         vacation_count = 0
+        total_work_hours = 0.0
+        
+        # Track hours per week for this employee
+        hours_by_week = {week_idx: 0.0 for week_idx in range(num_weeks)}
         
         # Mark vacation days or shift assignments
         for col_idx, date in enumerate(dates, start=2):
@@ -1140,12 +1171,51 @@ def export_schedule_to_excel(
                 cell.fill = working_fill
                 if assigned_shift:
                     cell.font = Font(size=9)
+                    
+                    # Calculate hours for this shift
+                    if assigned_shift in shifts:
+                        shift_obj = shifts[assigned_shift]
+                        try:
+                            start_time = datetime.strptime(shift_obj.start_time, "%H:%M")
+                            end_time = datetime.strptime(shift_obj.end_time, "%H:%M")
+                            shift_hours = (end_time - start_time).total_seconds() / 3600.0
+                            if shift_hours < 0:
+                                shift_hours += 24  # Handle overnight shifts
+                        except (ValueError, IndexError, AttributeError):
+                            shift_hours = DEFAULT_SHIFT_HOURS
+                    else:
+                        shift_hours = DEFAULT_SHIFT_HOURS
+                    
+                    # Determine which week this date belongs to
+                    for week_idx, (week_start, week_end) in enumerate(weeks_info):
+                        if week_start <= date <= week_end:
+                            hours_by_week[week_idx] += shift_hours
+                            break
+                    
+                    total_work_hours += shift_hours
+        
+        # Write weekly hours
+        for week_idx in range(num_weeks):
+            week_col = col_offset + week_idx
+            hours = hours_by_week[week_idx]
+            cell = ws_vacation.cell(row_idx, week_col, round(hours, 1) if hours > 0 else "")
+            cell.border = border
+            cell.alignment = center_align
+            if hours > 0:
+                cell.font = Font(bold=True)
         
         # Total vacation days
-        total_cell = ws_vacation.cell(row_idx, total_col, vacation_count)
-        total_cell.border = border
-        total_cell.alignment = center_align
-        total_cell.font = Font(bold=True)
+        vacation_cell = ws_vacation.cell(row_idx, total_vacation_col, vacation_count)
+        vacation_cell.border = border
+        vacation_cell.alignment = center_align
+        vacation_cell.font = Font(bold=True)
+        
+        # Total working hours
+        hours_cell = ws_vacation.cell(row_idx, total_hours_col, round(total_work_hours, 1) if total_work_hours > 0 else "")
+        hours_cell.border = border
+        hours_cell.alignment = center_align
+        if total_work_hours > 0:
+            hours_cell.font = Font(bold=True)
     
     # Add summary row
     summary_row = len(employees) + 3
