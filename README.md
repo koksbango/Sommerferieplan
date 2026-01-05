@@ -14,6 +14,7 @@ The scheduler considers:
 - Minimum coverage requirements for each shift
 - Weekday vs weekend coverage differences
 - Fair distribution of vacation days
+- **Consecutive vacation periods** - each employee's vacation is allocated as a single continuous block
 
 ## Requirements
 
@@ -187,21 +188,27 @@ The vacation period is currently set to June 1 - August 31, 2024 (92 days). You 
 
 ## Key Insights
 
-With the provided data (74 employees, 35 weekday positions, 26 weekend positions):
-- **5 weeks**: Maximum ~19 days per employee
-- **6 weeks**: Can achieve 21 days for all employees  
-- **Weekday capacity**: Up to 39 employees can be on vacation
-- **Weekend capacity**: Up to 48 employees can be on vacation
+With the provided data (74 employees, 31 summer weekday positions, 26 weekend positions):
+- **5 weeks with consecutive vacation**: 43 employees achieve 21 days, 31 employees get 14+ days
+  - Total: 1,337 vacation days allocated
+  - Average: 18.1 days per employee
+- **Consecutive vacation constraint**: All vacation days are allocated as a single continuous block per employee
+- **Weekday capacity**: Up to 43 employees can be on vacation simultaneously
+- **Weekend capacity**: Up to 48 employees can be on vacation simultaneously
+
+Note: The consecutive vacation constraint reduces total achievable days compared to non-consecutive allocation, but ensures practical vacation periods.
 
 ## Algorithm
 
-The vacation scheduler uses an iterative fair allocation algorithm:
+The vacation scheduler uses a consecutive block allocation algorithm:
 
 1. Calculate vacation capacity for each day type (weekday/weekend)
-2. Iteratively assign vacation days to employees with the fewest days assigned
-3. Ensure coverage requirements are met for each day (total employees and skill requirements)
-4. Continue until target is reached or no more vacation can be assigned
-5. Result: Fair distribution with minimal variance between employees
+2. For each employee, find the longest consecutive block of days where:
+   - Coverage requirements are met (total employees and skill requirements)
+   - Daily vacation capacity is not exceeded
+3. Try multiple employee orderings to maximize fairness
+4. Select the allocation that maximizes minimum days per employee
+5. Result: Each employee gets a single consecutive vacation period
 
 ## Example Files
 
