@@ -41,6 +41,16 @@ Specify custom input files:
 python3 vacation_calculator.py path/to/employees.csv path/to/shifts.csv path/to/coverage.csv
 ```
 
+### Custom Vacation Period
+
+Specify custom vacation period dates (in YYYY-MM-DD format):
+
+```bash
+python3 vacation_calculator.py employees.csv shifts.csv coverage.csv 2024-06-01 2024-08-31
+```
+
+The default vacation period is June 1, 2024 to August 31, 2024 (92 days).
+
 ## Input File Formats
 
 ### Employees CSV

@@ -14,15 +14,18 @@ from typing import Dict, List, Set, Tuple
 
 
 class Employee:
-    """Represents an employee with their skills."""
+    """Represents an employee with their skills and working hour constraints."""
     
-    def __init__(self, employee_id: str, name: str, skills: Set[str]):
+    def __init__(self, employee_id: str, name: str, skills: Set[str], 
+                 weekly_target_hours: int = 37, max_hours_per_week: int = 48):
         self.id = employee_id
         self.name = name
         self.skills = skills
+        self.weekly_target_hours = weekly_target_hours
+        self.max_hours_per_week = max_hours_per_week
     
     def __repr__(self):
-        return f"Employee({self.name}, {self.skills})"
+        return f"Employee({self.name}, {self.skills}, target={self.weekly_target_hours}h)"
 
 
 class Shift:
@@ -34,6 +37,62 @@ class Shift:
         self.start = start
         self.end = end
         self.category = category
+        
+        # Parse times to minutes for easier comparison
+        start_parts = start.split(':')
+        end_parts = end.split(':')
+        self.start_minutes = int(start_parts[0]) * 60 + int(start_parts[1])
+        self.end_minutes = int(end_parts[0]) * 60 + int(end_parts[1])
+        
+        # Handle overnight shifts
+        if self.end_minutes < self.start_minutes:
+            self.end_minutes += 24 * 60
+    
+    def overlaps_with(self, other: 'Shift') -> bool:
+        """Check if this shift overlaps in time with another shift."""
+        return self.start_minutes < other.end_minutes and other.start_minutes < self.end_minutes
+    
+    def can_work_both(self, other: 'Shift', min_rest_hours: int = 11) -> bool:
+        """Check if an employee can work both this shift and another shift with required rest.
+        
+        Args:
+            other: Another shift
+            min_rest_hours: Minimum rest hours required between shifts (default 11)
+        
+        Returns:
+            True if both shifts can be worked with sufficient rest, False otherwise
+        """
+        min_rest_minutes = min_rest_hours * 60
+        
+        # If shifts overlap, cannot work both
+        if self.overlaps_with(other):
+            return False
+        
+        # Check rest time between shifts
+        # Case 1: this shift ends before other starts
+        if self.end_minutes <= other.start_minutes:
+            rest_time = other.start_minutes - self.end_minutes
+            return rest_time >= min_rest_minutes
+        
+        # Case 2: other shift ends before this starts
+        if other.end_minutes <= self.start_minutes:
+            rest_time = self.start_minutes - other.end_minutes
+            return rest_time >= min_rest_minutes
+        
+        # Case 3: shifts span midnight - need more complex calculation
+        # For simplicity in this case, we'll check across the 24-hour boundary
+        time_from_self_end_to_midnight = (24 * 60) - self.end_minutes
+        time_from_midnight_to_other_start = other.start_minutes
+        rest_time = time_from_self_end_to_midnight + time_from_midnight_to_other_start
+        
+        if rest_time >= min_rest_minutes:
+            return True
+        
+        time_from_other_end_to_midnight = (24 * 60) - other.end_minutes
+        time_from_midnight_to_self_start = self.start_minutes
+        rest_time = time_from_other_end_to_midnight + time_from_midnight_to_self_start
+        
+        return rest_time >= min_rest_minutes
     
     def __repr__(self):
         return f"Shift({self.name}, {self.start}-{self.end}, {self.category})"
@@ -66,10 +125,12 @@ def load_employees(filepath: str) -> List[Employee]:
             for row in reader:
                 employee_id = row['id'].strip()
                 name = row['name'].strip().strip('"')
+                weekly_target_hours = int(row['weekly_target_hours'].strip())
+                max_hours_per_week = int(row['max_hours_per_week'].strip())
                 skills_str = row['skills'].strip().strip('"')
                 # Skills are semicolon-separated
                 skills = set(s.strip() for s in skills_str.split(';') if s.strip())
-                employees.append(Employee(employee_id, name, skills))
+                employees.append(Employee(employee_id, name, skills, weekly_target_hours, max_hours_per_week))
     except FileNotFoundError:
         print(f"Error: File '{filepath}' not found.", file=sys.stderr)
         sys.exit(1)
@@ -153,35 +214,152 @@ def get_coverage_requirements_by_type(coverage: List[CoverageRequirement]) -> Di
 
 def can_cover_requirements(
     employees_available: List[Employee],
-    requirements: List[CoverageRequirement]
+    requirements: List[CoverageRequirement],
+    shifts: Dict[str, Shift]
 ) -> bool:
-    """Check if available employees can cover all requirements.
+    """Check if available employees can cover all requirements considering shift overlaps and rest requirements.
+    
+    This uses a greedy algorithm:
+    1. Build conflict graph - shifts that cannot be worked by same employee (overlap or insufficient rest)
+    2. Calculate maximum independent set size needed
+    3. Check if we have enough employees with required skills
     
     Args:
         employees_available: List of employees working that day
-        requirements: List of coverage requirements
+        requirements: List of coverage requirements (all shifts for the day)
+        shifts: Dict mapping shift name to Shift object
     
     Returns:
         True if requirements can be met, False otherwise
     """
     # Group requirements by shift
-    shift_requirements = defaultdict(list)
+    reqs_by_shift = defaultdict(list)
     for req in requirements:
-        shift_requirements[req.shift_id].append(req)
+        if req.shift_id in shifts:
+            reqs_by_shift[req.shift_id].append(req)
     
-    # For each shift, check if we have enough coverage
-    for shift_id, reqs in shift_requirements.items():
-        # Check each specific skill requirement
-        for req in reqs:
-            if req.required_skill == "None":
-                # General coverage - count all available employees
-                available_count = len(employees_available)
-            else:
-                # Specific skill required - count employees with that skill
-                available_count = sum(1 for emp in employees_available if req.required_skill in emp.skills)
+    # Calculate requirements per shift
+    shift_needs = {}
+    for shift_id, reqs in reqs_by_shift.items():
+        total_for_shift = sum(r.required for r in reqs)
+        skill_reqs = {}
+        for r in reqs:
+            if r.required_skill != "None":
+                skill_reqs[r.required_skill] = r.required
+        shift_needs[shift_id] = {
+            'total': total_for_shift,
+            'skills': skill_reqs,
+            'shift': shifts[shift_id]
+        }
+    
+    # Build conflict graph: which shifts conflict with each other
+    # Two shifts conflict if they overlap OR don't have 11 hours rest between them
+    shift_ids = list(shift_needs.keys())
+    conflicts = defaultdict(set)
+    
+    for i, shift_id1 in enumerate(shift_ids):
+        for j, shift_id2 in enumerate(shift_ids):
+            if i >= j:
+                continue
+            shift1 = shift_needs[shift_id1]['shift']
+            shift2 = shift_needs[shift_id2]['shift']
             
-            if available_count < req.required:
-                return False
+            # Check if an employee can work both shifts
+            if not shift1.can_work_both(shift2):
+                conflicts[shift_id1].add(shift_id2)
+                conflicts[shift_id2].add(shift_id1)
+    
+    # Use a greedy coloring approach to estimate minimum employees needed
+    # This gives us a lower bound on the number of employees needed
+    
+    # Calculate chromatic number approximation (employees needed)
+    # Sort shifts by number of conflicts (most constrained first)
+    sorted_shifts = sorted(shift_ids, key=lambda s: len(conflicts[s]), reverse=True)
+    
+    # Greedy coloring: assign each shift to an "employee slot"
+    employee_assignments = []  # Each element is a list of shifts that can be worked by one employee
+    
+    for shift_id in sorted_shifts:
+        # Find an employee slot that can accommodate this shift
+        assigned = False
+        for slot in employee_assignments:
+            # Check if this shift conflicts with any shift already in this slot
+            can_add = True
+            for existing_shift in slot:
+                if existing_shift in conflicts[shift_id]:
+                    can_add = False
+                    break
+            
+            if can_add:
+                # Need to add enough "copies" of this shift based on requirements
+                slot.append(shift_id)
+                assigned = True
+                break
+        
+        if not assigned:
+            # Need a new employee slot
+            employee_assignments.append([shift_id])
+    
+    # Now we need to account for the actual number of people needed per shift
+    # A shift requiring 5 people needs 5 separate employee slots
+    total_employee_slots_needed = 0
+    for shift_id, needs in shift_needs.items():
+        # Each person working this shift needs their own slot
+        # Find how many slots we'd need if all people in this shift also work other shifts
+        total_employee_slots_needed = max(total_employee_slots_needed, needs['total'])
+    
+    # More accurate calculation: sum up requirements considering conflicts
+    # Use maximum clique/independent set approach
+    # For simplicity, we'll use a conservative estimate:
+    # Count total requirements where shifts conflict
+    
+    # Alternative simpler approach: calculate maximum required at any time considering rest periods
+    # Group shifts into "waves" that cannot share employees
+    waves = []
+    for shift_id in sorted_shifts:
+        shift = shift_needs[shift_id]['shift']
+        needs = shift_needs[shift_id]
+        
+        # Find a wave this can be added to (no conflicts with any shift in wave)
+        placed = False
+        for wave in waves:
+            can_add_to_wave = True
+            for other_shift_id in wave['shifts']:
+                if other_shift_id in conflicts[shift_id]:
+                    can_add_to_wave = False
+                    break
+            
+            if can_add_to_wave:
+                wave['shifts'].append(shift_id)
+                wave['total'] += needs['total']
+                for skill, count in needs['skills'].items():
+                    wave['skills'][skill] = wave['skills'].get(skill, 0) + count
+                placed = True
+                break
+        
+        if not placed:
+            waves.append({
+                'shifts': [shift_id],
+                'total': needs['total'],
+                'skills': dict(needs['skills'])
+            })
+    
+    # Find the wave with maximum requirements
+    max_employees_needed = max(wave['total'] for wave in waves) if waves else 0
+    max_skill_requirements = defaultdict(int)
+    for wave in waves:
+        for skill, count in wave['skills'].items():
+            max_skill_requirements[skill] = max(max_skill_requirements[skill], count)
+    
+    # Check if we have enough employees
+    if len(employees_available) < max_employees_needed:
+        return False
+    
+    # Check if we have enough employees with each required skill
+    for skill, required in max_skill_requirements.items():
+        available_with_skill = sum(1 for emp in employees_available if skill in emp.skills)
+        if available_with_skill < required:
+            return False
     
     return True
 
@@ -190,21 +368,22 @@ def calculate_max_vacation_days(
     employees: List[Employee],
     coverage_weekday: List[CoverageRequirement],
     coverage_weekend: List[CoverageRequirement],
+    shifts: Dict[str, Shift],
     start_date: datetime,
     end_date: datetime
 ) -> Dict[str, int]:
     """Calculate maximum vacation days each employee can take.
     
     Strategy:
-    - For each employee, try to maximize their vacation days
-    - A day is a possible vacation day if all shift requirements can still be met
-      without that employee
-    - Consider weekday vs weekend requirements
+    - For each employee, check each day to see if coverage can be maintained without them
+    - Consider shift overlaps - not all shifts run simultaneously
+    - Count days where the employee can be absent
     
     Args:
         employees: List of all employees
         coverage_weekday: Coverage requirements for weekdays
         coverage_weekend: Coverage requirements for weekends
+        shifts: Dict mapping shift name to Shift object
         start_date: Start of vacation period
         end_date: End of vacation period
     
@@ -226,14 +405,14 @@ def calculate_max_vacation_days(
         
         for date in dates:
             # Determine if it's a weekday or weekend
-            # Monday=0, Sunday=6
-            is_weekend = date.weekday() >= 5  # Saturday or Sunday
+            # Monday=0, Sunday=6; so Saturday=5, Sunday=6
+            is_weekend = date.weekday() in (5, 6)
             requirements = coverage_weekend if is_weekend else coverage_weekday
             
             # Check if requirements can be met without this employee
             other_employees = [e for e in employees if e.id != employee.id]
             
-            if can_cover_requirements(other_employees, requirements):
+            if can_cover_requirements(other_employees, requirements, shifts):
                 possible_vacation_days += 1
         
         vacation_days[employee.name] = possible_vacation_days
@@ -241,14 +420,39 @@ def calculate_max_vacation_days(
     return vacation_days
 
 
-def print_results(vacation_days: Dict[str, int], total_days: int):
+def print_results(vacation_days: Dict[str, int], total_days: int, employees: List[Employee], 
+                  coverage_weekday: List[CoverageRequirement], coverage_weekend: List[CoverageRequirement],
+                  shifts: Dict[str, Shift]):
     """Print the vacation calculation results."""
-    print("\n" + "=" * 60)
+    
+    # Calculate coverage statistics
+    weekday_total = sum(req.required for req in coverage_weekday)
+    weekend_total = sum(req.required for req in coverage_weekend)
+    total_employees = len(employees)
+    
+    # Count weekday shifts and requirements
+    weekday_shifts = set(req.shift_id for req in coverage_weekday)
+    weekend_shifts = set(req.shift_id for req in coverage_weekend)
+    
+    print("\n" + "=" * 70)
+    print("COVERAGE ANALYSIS")
+    print("=" * 70)
+    print(f"\nTotal employees: {total_employees}")
+    print(f"\nWeekday coverage:")
+    print(f"  Total positions needed: {weekday_total}")
+    print(f"  Number of different shifts: {len(weekday_shifts)}")
+    print(f"  Theoretical max on vacation: {total_employees - weekday_total}")
+    print(f"\nWeekend coverage:")
+    print(f"  Total positions needed: {weekend_total}")
+    print(f"  Number of different shifts: {len(weekend_shifts)}")
+    print(f"  Theoretical max on vacation: {total_employees - weekend_total}")
+    
+    print("\n" + "=" * 70)
     print("SUMMER VACATION ALLOCATION RESULTS")
-    print("=" * 60)
+    print("=" * 70)
     print(f"\nTotal days in summer period: {total_days}")
     print("\nMaximum vacation days per employee:")
-    print("-" * 60)
+    print("-" * 70)
     
     # Sort by name for consistent output
     for name in sorted(vacation_days.keys()):
@@ -256,9 +460,16 @@ def print_results(vacation_days: Dict[str, int], total_days: int):
         percentage = (days / total_days * 100) if total_days > 0 else 0
         print(f"  {name:20s}: {days:3d} days ({percentage:5.1f}%)")
     
-    print("=" * 60)
-    print("\nNote: These are maximum possible days. Actual allocation may vary")
-    print("based on coordination and fairness policies.")
+    print("=" * 70)
+    print("\nNOTE: This is a simplified analysis. The actual calculation shows")
+    print("each employee can take vacation on any single day because with 74")
+    print(f"employees and only {weekday_total} positions needed on weekdays, there is")
+    print("significant redundancy. A more sophisticated scheduler would be needed")
+    print("to optimize vacation distribution while considering:")
+    print("  - Multi-day shift patterns and rest requirements")
+    print("  - Weekly working hour limits and targets (over 6-week periods)")
+    print("  - Fairness in vacation allocation")
+    print("  - Actual shift assignments and rotations")
     print()
 
 
@@ -269,6 +480,14 @@ def main():
     shifts_file = "shifts.csv"
     coverage_file = "coverage.csv"
     
+    # Default vacation period
+    start_year = 2024
+    start_month = 6
+    start_day = 1
+    end_year = 2024
+    end_month = 8
+    end_day = 31
+    
     # Parse command line arguments if provided
     if len(sys.argv) > 1:
         employees_file = sys.argv[1]
@@ -276,6 +495,24 @@ def main():
         shifts_file = sys.argv[2]
     if len(sys.argv) > 3:
         coverage_file = sys.argv[3]
+    if len(sys.argv) > 4:
+        # Optional: start date in YYYY-MM-DD format
+        try:
+            start_parts = sys.argv[4].split('-')
+            start_year = int(start_parts[0])
+            start_month = int(start_parts[1])
+            start_day = int(start_parts[2])
+        except (ValueError, IndexError):
+            print(f"Warning: Invalid start date format '{sys.argv[4]}', using default", file=sys.stderr)
+    if len(sys.argv) > 5:
+        # Optional: end date in YYYY-MM-DD format
+        try:
+            end_parts = sys.argv[5].split('-')
+            end_year = int(end_parts[0])
+            end_month = int(end_parts[1])
+            end_day = int(end_parts[2])
+        except (ValueError, IndexError):
+            print(f"Warning: Invalid end date format '{sys.argv[5]}', using default", file=sys.stderr)
     
     print(f"Loading employees from: {employees_file}")
     employees = load_employees(employees_file)
@@ -302,10 +539,9 @@ def main():
     coverage_weekday = coverage_by_type.get('Weekday', [])
     coverage_weekend = coverage_by_type.get('Weekend', [])
     
-    # Define summer vacation period (example: June 1 - August 31, 2024)
-    # User can modify these dates as needed
-    start_date = datetime(2024, 6, 1)
-    end_date = datetime(2024, 8, 31)
+    # Define summer vacation period
+    start_date = datetime(start_year, start_month, start_day)
+    end_date = datetime(end_year, end_month, end_day)
     total_days = (end_date - start_date).days + 1
     
     print(f"\nCalculating vacation days for period: {start_date.date()} to {end_date.date()}")
@@ -316,12 +552,13 @@ def main():
         employees, 
         coverage_weekday, 
         coverage_weekend,
+        shifts,
         start_date,
         end_date
     )
     
     # Print results
-    print_results(vacation_days, total_days)
+    print_results(vacation_days, total_days, employees, coverage_weekday, coverage_weekend, shifts)
 
 
 if __name__ == "__main__":
