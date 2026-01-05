@@ -1,6 +1,6 @@
 # Sommerferieplan
 
-A Python script that calculates and optimizes summer vacation schedules for ATC (Air Traffic Control) employees.
+A Python script that calculates and optimizes summer vacation schedules for ATC employees.
 
 ## Overview
 
