@@ -827,6 +827,27 @@ def assign_shifts_to_employees(
     Returns:
         Dict mapping employee name -> Dict mapping date -> shift assignment
     """
+    # Helper functions for candidate filtering and sorting
+    def get_valid_candidates(available_employees, week_start, shift_hours, assigned_today, required_skill=None):
+        """Filter employees who can take this shift without exceeding max weekly hours."""
+        candidates = []
+        for emp in available_employees:
+            if emp.name in assigned_today:
+                continue
+            if required_skill and required_skill not in emp.skills:
+                continue
+            week_hours = hours_per_week[(emp.name, week_start)]
+            if week_hours + shift_hours > emp.max_hours_per_week:
+                continue  # Skip employees who would exceed max
+            candidates.append(emp)
+        return candidates
+    
+    def create_sort_key_for_employee(emp, week_start, shift_hours):
+        """Create a sort key for fair employee assignment."""
+        week_hours = hours_per_week[(emp.name, week_start)]
+        would_exceed_target = (week_hours + shift_hours) > emp.weekly_target_hours
+        return (would_exceed_target, week_hours, shift_counts[emp.name], total_hours[emp.name], emp.name)
+    
     # Initialize shift assignments
     shift_assignments = {emp.name: {} for emp in employees}
     
@@ -889,23 +910,11 @@ def assign_shifts_to_employees(
             
             # First, assign employees with required skills
             for skill, needed in skill_needs.items():
-                # Filter to only candidates who won't exceed max_hours_per_week
-                candidates = []
-                for emp in employees_available:
-                    if skill not in emp.skills or emp.name in assigned_today:
-                        continue
-                    week_hours = hours_per_week[(emp.name, week_start)]
-                    if week_hours + shift_hours > emp.max_hours_per_week:
-                        continue  # Skip employees who would exceed max
-                    candidates.append(emp)
+                # Get valid candidates with required skill
+                candidates = get_valid_candidates(employees_available, week_start, shift_hours, assigned_today, skill)
                 
                 # Sort candidates by fairness priority (prefer those below target hours)
-                def sort_key(emp):
-                    week_hours = hours_per_week[(emp.name, week_start)]
-                    would_exceed_target = (week_hours + shift_hours) > emp.weekly_target_hours
-                    return (would_exceed_target, week_hours, shift_counts[emp.name], total_hours[emp.name], emp.name)
-                
-                candidates.sort(key=sort_key)
+                candidates.sort(key=lambda emp: create_sort_key_for_employee(emp, week_start, shift_hours))
                 
                 # Assign the needed number of employees
                 for i in range(min(needed, len(candidates))):
@@ -922,23 +931,11 @@ def assign_shifts_to_employees(
             # Then assign remaining positions to any available employee
             remaining_needed = total_needed - len(assigned_this_shift)
             if remaining_needed > 0:
-                # Filter to only candidates who won't exceed max_hours_per_week
-                candidates = []
-                for emp in employees_available:
-                    if emp.name in assigned_today:
-                        continue
-                    week_hours = hours_per_week[(emp.name, week_start)]
-                    if week_hours + shift_hours > emp.max_hours_per_week:
-                        continue  # Skip employees who would exceed max
-                    candidates.append(emp)
+                # Get valid candidates (any skill)
+                candidates = get_valid_candidates(employees_available, week_start, shift_hours, assigned_today)
                 
                 # Sort candidates using same strategy
-                def sort_key(emp):
-                    week_hours = hours_per_week[(emp.name, week_start)]
-                    would_exceed_target = (week_hours + shift_hours) > emp.weekly_target_hours
-                    return (would_exceed_target, week_hours, shift_counts[emp.name], total_hours[emp.name], emp.name)
-                
-                candidates.sort(key=sort_key)
+                candidates.sort(key=lambda emp: create_sort_key_for_employee(emp, week_start, shift_hours))
                 
                 for i in range(min(remaining_needed, len(candidates))):
                     emp = candidates[i]
