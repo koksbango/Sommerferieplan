@@ -1280,6 +1280,14 @@ def export_schedule_to_excel(
     ws_vacation.cell(1, total_hours_col).border = border
     ws_vacation.column_dimensions[ws_vacation.cell(1, total_hours_col).column_letter].width = 10
     
+    # Add "% Target" column (percentage of accumulated target hours)
+    total_pct_target_col = total_hours_col + 1
+    ws_vacation.cell(1, total_pct_target_col, "% Target").fill = header_fill
+    ws_vacation.cell(1, total_pct_target_col).font = header_font
+    ws_vacation.cell(1, total_pct_target_col).alignment = center_align
+    ws_vacation.cell(1, total_pct_target_col).border = border
+    ws_vacation.column_dimensions[ws_vacation.cell(1, total_pct_target_col).column_letter].width = 10
+    
     # Convert vacation_schedule to set of dates for faster lookup
     vacation_dates_by_employee = {
         name: set(dates) for name, dates in vacation_schedule.items()
@@ -1426,6 +1434,30 @@ def export_schedule_to_excel(
         hours_cell.alignment = center_align
         if total_work_hours > 0:
             hours_cell.font = Font(bold=True)
+        
+        # Total % Target (percentage of accumulated target hours)
+        # Calculate accumulated target hours based on working days
+        working_days = len(dates) - vacation_count  # Total days - vacation days
+        if working_days > 0 and emp.weekly_target_hours > 0:
+            # Accumulated target = (working_days / 7) * weekly_target_hours
+            accumulated_target_hours = (working_days / 7.0) * emp.weekly_target_hours
+            pct_target = (total_work_hours / accumulated_target_hours) * 100
+            pct_cell = ws_vacation.cell(row_idx, total_pct_target_col, f"{round(pct_target, 1)}%")
+            pct_cell.border = border
+            pct_cell.alignment = center_align
+            # Color code based on percentage
+            if pct_target > 100:
+                pct_cell.fill = PatternFill(start_color="FFD9D9", end_color="FFD9D9", fill_type="solid")  # Light red
+                pct_cell.font = Font(bold=True, color="CC0000")
+            elif pct_target >= 90:
+                pct_cell.fill = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")  # Light yellow
+                pct_cell.font = Font(bold=True)
+            else:
+                pct_cell.font = Font(bold=True)
+        else:
+            pct_cell = ws_vacation.cell(row_idx, total_pct_target_col, "")
+            pct_cell.border = border
+            pct_cell.alignment = center_align
     
     # Add summary row
     summary_row = len(employees) + 3
