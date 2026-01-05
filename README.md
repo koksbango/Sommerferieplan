@@ -48,15 +48,15 @@ python3 vacation_scheduler.py
 
 **Custom parameters:**
 ```bash
-python3 vacation_scheduler.py employees.csv coverage.csv 2024-07-01 5 21
+python3 vacation_scheduler.py employees.csv coverage.csv 2026-06-29 5 21
 ```
 - `employees.csv`: Employee data file
 - `coverage.csv`: Coverage requirements file  
-- `2024-07-01`: Start date (YYYY-MM-DD) - defaults to July 1, 2024 (week 27)
-- `5`: Number of weeks - defaults to 5 weeks (July 1 - August 4, weeks 27-31)
+- `2026-06-29`: Start date (YYYY-MM-DD) - defaults to June 29, 2026 (week 27)
+- `5`: Number of weeks - defaults to 5 weeks (June 29 - August 2, weeks 27-31)
 - `21`: Target vacation days per employee
 
-**Note:** The default vacation period is Week 27 to Week 31 (July 1 - August 4, 2024), which is the standard summer vacation period.
+**Note:** The default vacation period is Week 27 to Week 31 (June 29 - August 2, 2026), which is the standard summer vacation period.
 
 **Example output:**
 ```
@@ -76,8 +76,8 @@ Allocating consecutive vacation blocks with equal distribution...
   Analyzing vacation groups...
   Group 1 (vacation in first half): 37 employees
   Group 2 (vacation in second half): 37 employees
-  First vacation starts: 2024-07-01
-  Last vacation starts: 2024-07-18
+  First vacation starts: 2026-06-29
+  Last vacation starts: 2026-07-16
 
 Results:
   Total vacation days allocated: 1258

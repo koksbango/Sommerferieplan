@@ -1086,10 +1086,10 @@ def main():
     coverage_file = "coverage.csv"
     
     # Vacation period parameters
-    # Summer vacation: Week 27 (July 1) to end of Week 31 (August 4)
-    start_year = 2024
-    start_month = 7
-    start_day = 1
+    # Summer vacation: Week 27 (June 29) to end of Week 31 (August 2)
+    start_year = 2026
+    start_month = 6
+    start_day = 29
     num_weeks = 5  # 5-week range (35 days)
     target_days = 21
     
