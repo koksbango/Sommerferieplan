@@ -19,6 +19,10 @@ except ImportError:
     OPENPYXL_AVAILABLE = False
 
 
+# Constants
+DEFAULT_SHIFT_HOURS = 8.0  # Default assumption for shift duration when calculation fails
+
+
 class Employee:
     """Represents an employee with their skills and working hour constraints."""
     
@@ -418,8 +422,6 @@ def print_vacation_results(
 
 def calculate_shift_hours(shift_id: str, shifts: Dict[str, 'Shift']) -> float:
     """Calculate duration of a shift in hours."""
-    DEFAULT_SHIFT_HOURS = 8.0  # Default assumption for shift duration
-    
     shift = shifts.get(shift_id)
     if not shift:
         return DEFAULT_SHIFT_HOURS
