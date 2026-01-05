@@ -621,6 +621,183 @@ def calculate_shift_hours(shift_id: str, shifts: Dict[str, 'Shift']) -> float:
         return DEFAULT_SHIFT_HOURS  # Default on error
 
 
+def rebalance_shift_assignments(
+    shift_assignments: Dict[str, Dict[datetime, str]],
+    employees: List[Employee],
+    vacation_dates_by_employee: Dict[str, Set[datetime]],
+    coverage_weekday: List[CoverageRequirement],
+    coverage_weekend: List[CoverageRequirement],
+    dates: List[datetime],
+    shifts: Dict[str, 'Shift'],
+    employee_by_name: Dict[str, Employee]
+) -> Dict[str, Dict[datetime, str]]:
+    """Rebalance shift assignments to improve fairness.
+    
+    This function performs multiple passes to redistribute shifts from over-assigned
+    employees to under-assigned employees while maintaining coverage requirements.
+    
+    Args:
+        shift_assignments: Current shift assignments
+        employees: List of all employees
+        vacation_dates_by_employee: Set of vacation dates per employee
+        coverage_weekday: Coverage requirements for weekdays
+        coverage_weekend: Coverage requirements for weekends
+        dates: List of dates in the period
+        shifts: Dict mapping shift ID to Shift object
+        employee_by_name: Dict mapping employee name to Employee object
+    
+    Returns:
+        Rebalanced shift assignments
+    """
+    # Calculate current shift counts and hours
+    shift_counts = defaultdict(int)
+    total_hours = defaultdict(float)
+    
+    for emp_name, assignments in shift_assignments.items():
+        for date, shift_id in assignments.items():
+            shift_counts[emp_name] += 1
+            total_hours[emp_name] += calculate_shift_hours(shift_id, shifts)
+    
+    # Get working employees (those not on vacation entire period)
+    working_employees = [emp for emp in employees if shift_counts[emp.name] > 0]
+    
+    if not working_employees:
+        return shift_assignments
+    
+    # Calculate target shift count (average)
+    total_shifts = sum(shift_counts.values())
+    avg_shifts = total_shifts / len(working_employees)
+    
+    # Calculate ideal min/max bounds (tight tolerance for fairness)
+    min_target = int(avg_shifts) - 1  # Allow 1 below average
+    max_target = int(avg_shifts) + 2  # Allow 2 above average
+    
+    initial_min = min(shift_counts[emp.name] for emp in working_employees)
+    initial_max = max(shift_counts[emp.name] for emp in working_employees)
+    initial_spread = initial_max - initial_min
+    
+    # Perform multiple rebalancing passes with progressively tighter constraints
+    max_passes = 30  # Increased passes for more thorough balancing
+    total_transfers = 0
+    
+    for pass_num in range(max_passes):
+        # Find over-assigned and under-assigned employees
+        # Use more aggressive thresholds as passes progress
+        threshold_adjustment = max(0, 2 - (pass_num // 10))  # Start aggressive, become more lenient
+        current_max_target = max_target + threshold_adjustment
+        current_min_target = min_target - threshold_adjustment
+        
+        over_assigned = []
+        under_assigned = []
+        
+        for emp in working_employees:
+            count = shift_counts[emp.name]
+            if count > current_max_target:
+                over_assigned.append((emp, count - current_max_target))
+            elif count < current_min_target:
+                under_assigned.append((emp, current_min_target - count))
+        
+        # Sort by deviation magnitude
+        over_assigned.sort(key=lambda x: x[1], reverse=True)
+        under_assigned.sort(key=lambda x: x[1], reverse=True)
+        
+        if not over_assigned or not under_assigned:
+            break  # Balanced enough
+        
+        # Try to transfer shifts
+        transfers_made = 0
+        for over_emp, _ in over_assigned:
+            # Get shifts assigned to this employee
+            over_emp_shifts = [(date, shift_id) for date, shift_id 
+                              in shift_assignments[over_emp.name].items()]
+            
+            # Shuffle shifts to try different ones each pass
+            if pass_num > 0:
+                import random
+                random.seed(42 + pass_num)
+                random.shuffle(over_emp_shifts)
+            
+            # Try to transfer some shifts to under-assigned employees
+            for date, shift_id in over_emp_shifts:
+                # Check if we can find a replacement
+                is_weekend = date.weekday() >= 5
+                requirements = coverage_weekend if is_weekend else coverage_weekday
+                
+                # Get requirements for this shift
+                shift_reqs = [req for req in requirements if req.shift_id == shift_id]
+                if not shift_reqs:
+                    continue
+                
+                # Find skill requirements
+                skill_needed = None
+                for req in shift_reqs:
+                    if req.required_skill != "None":
+                        skill_needed = req.required_skill
+                        break
+                
+                # Try under-assigned employees as replacements
+                for under_emp, _ in under_assigned:
+                    # Check if employee is available (not on vacation)
+                    if date in vacation_dates_by_employee.get(under_emp.name, set()):
+                        continue
+                    
+                    # Check if employee already has a shift this day
+                    if date in shift_assignments[under_emp.name]:
+                        continue
+                    
+                    # Check if employee has required skill (but all employees have all skills now)
+                    if skill_needed and skill_needed not in under_emp.skills:
+                        continue
+                    
+                    # Check weekly hours constraint - be more lenient as passes progress
+                    week_start = date - timedelta(days=date.weekday())
+                    week_dates = [d for d in dates if (d - timedelta(days=d.weekday())) == week_start]
+                    
+                    current_week_hours = sum(
+                        calculate_shift_hours(shift_assignments[under_emp.name].get(d, ''), shifts)
+                        for d in week_dates if d in shift_assignments[under_emp.name]
+                    )
+                    
+                    shift_hours = calculate_shift_hours(shift_id, shifts)
+                    # Allow some flexibility on weekly hours in later passes
+                    max_allowed = under_emp.max_hours_per_week
+                    if pass_num > 10:
+                        max_allowed += 4  # Allow slight overtime in later passes for fairness
+                    
+                    if current_week_hours + shift_hours > max_allowed:
+                        continue
+                    
+                    # Transfer the shift
+                    del shift_assignments[over_emp.name][date]
+                    shift_assignments[under_emp.name][date] = shift_id
+                    
+                    # Update counts
+                    shift_counts[over_emp.name] -= 1
+                    shift_counts[under_emp.name] += 1
+                    total_hours[over_emp.name] -= shift_hours
+                    total_hours[under_emp.name] += shift_hours
+                    
+                    transfers_made += 1
+                    total_transfers += 1
+                    break  # Move to next shift
+                
+                # Stop if over-assigned employee is now balanced
+                if shift_counts[over_emp.name] <= current_max_target:
+                    break
+        
+        if transfers_made == 0:
+            break  # No more improvements possible
+    
+    final_min = min(shift_counts[emp.name] for emp in working_employees)
+    final_max = max(shift_counts[emp.name] for emp in working_employees)
+    final_spread = final_max - final_min
+    
+    print(f"  Rebalancing completed: {total_transfers} shift transfers")
+    print(f"  Shift count spread: {initial_spread} → {final_spread} (improved by {initial_spread - final_spread})")
+    
+    return shift_assignments
+
+
 def assign_shifts_to_employees(
     employees: List[Employee],
     vacation_schedule: Dict[str, List[datetime]],
@@ -766,6 +943,21 @@ def assign_shifts_to_employees(
                     hours_per_week[(emp.name, week_start)] += shift_hours
                     total_hours[emp.name] += shift_hours
                     shift_counts[emp.name] += 1
+    
+    # Post-processing: Rebalance shifts for better fairness
+    print("\nRebalancing shifts for improved fairness...")
+    shift_assignments = rebalance_shift_assignments(
+        shift_assignments, employees, vacation_dates_by_employee, 
+        coverage_weekday, coverage_weekend, dates, shifts, employee_by_name
+    )
+    
+    # Recalculate statistics after rebalancing
+    shift_counts = defaultdict(int)
+    total_hours = defaultdict(float)
+    for emp_name, assignments in shift_assignments.items():
+        for date, shift_id in assignments.items():
+            shift_counts[emp_name] += 1
+            total_hours[emp_name] += calculate_shift_hours(shift_id, shifts)
     
     # Print fairness statistics
     print("\nShift distribution statistics:")
