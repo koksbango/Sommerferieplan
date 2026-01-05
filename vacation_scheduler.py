@@ -1186,8 +1186,32 @@ def export_schedule_to_excel(
         cell.border = border
         ws_vacation.column_dimensions[cell.column_letter].width = 10
     
+    # Add weekly workload percentage columns (% of target hours)
+    target_pct_col_start = col_offset + num_weeks
+    for week_idx in range(num_weeks):
+        week_col = target_pct_col_start + week_idx
+        cell = ws_vacation.cell(1, week_col)
+        cell.value = f"Week {week_idx + 1}\n% Target"
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center_align
+        cell.border = border
+        ws_vacation.column_dimensions[cell.column_letter].width = 10
+    
+    # Add weekly workload percentage columns (% of max hours)
+    max_pct_col_start = target_pct_col_start + num_weeks
+    for week_idx in range(num_weeks):
+        week_col = max_pct_col_start + week_idx
+        cell = ws_vacation.cell(1, week_col)
+        cell.value = f"Week {week_idx + 1}\n% Max"
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center_align
+        cell.border = border
+        ws_vacation.column_dimensions[cell.column_letter].width = 10
+    
     # Add "Total Vacation" and "Total Hours" columns
-    total_vacation_col = col_offset + num_weeks
+    total_vacation_col = max_pct_col_start + num_weeks
     ws_vacation.cell(1, total_vacation_col, "Total\nVacation").fill = header_fill
     ws_vacation.cell(1, total_vacation_col).font = header_font
     ws_vacation.cell(1, total_vacation_col).alignment = center_align
@@ -1285,6 +1309,55 @@ def export_schedule_to_excel(
             cell.alignment = center_align
             if hours > 0:
                 cell.font = Font(bold=True)
+        
+        # Write weekly workload percentage (% of target hours)
+        for week_idx in range(num_weeks):
+            week_col = target_pct_col_start + week_idx
+            hours = hours_by_week[week_idx]
+            if hours > 0 and emp.weekly_target_hours > 0:
+                pct = (hours / emp.weekly_target_hours) * 100
+                cell = ws_vacation.cell(row_idx, week_col, f"{round(pct, 1)}%")
+                cell.border = border
+                cell.alignment = center_align
+                # Color code based on percentage
+                if pct > 100:
+                    cell.fill = PatternFill(start_color="FFD9D9", end_color="FFD9D9", fill_type="solid")  # Light red
+                    cell.font = Font(bold=True, color="CC0000")
+                elif pct >= 90:
+                    cell.fill = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")  # Light yellow
+                    cell.font = Font(bold=True)
+                else:
+                    cell.font = Font(bold=True)
+            else:
+                cell = ws_vacation.cell(row_idx, week_col, "")
+                cell.border = border
+                cell.alignment = center_align
+        
+        # Write weekly workload percentage (% of max hours)
+        for week_idx in range(num_weeks):
+            week_col = max_pct_col_start + week_idx
+            hours = hours_by_week[week_idx]
+            if hours > 0 and emp.max_hours_per_week > 0:
+                pct = (hours / emp.max_hours_per_week) * 100
+                cell = ws_vacation.cell(row_idx, week_col, f"{round(pct, 1)}%")
+                cell.border = border
+                cell.alignment = center_align
+                # Color code based on percentage
+                if pct > 100:
+                    cell.fill = PatternFill(start_color="FF6B6B", end_color="FF6B6B", fill_type="solid")  # Red
+                    cell.font = Font(bold=True, color="FFFFFF")
+                elif pct >= 95:
+                    cell.fill = PatternFill(start_color="FFB366", end_color="FFB366", fill_type="solid")  # Orange
+                    cell.font = Font(bold=True)
+                elif pct >= 85:
+                    cell.fill = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")  # Light yellow
+                    cell.font = Font(bold=True)
+                else:
+                    cell.font = Font(bold=True)
+            else:
+                cell = ws_vacation.cell(row_idx, week_col, "")
+                cell.border = border
+                cell.alignment = center_align
         
         # Total vacation days
         vacation_cell = ws_vacation.cell(row_idx, total_vacation_col, vacation_count)
