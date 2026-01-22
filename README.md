@@ -194,9 +194,9 @@ The vacation wishes file allows employees to prioritize their preferred vacation
 
 Format:
 ```csv
-employee;priority1;priority2;priority3;priority4
-"test1";"27";"28";"26";"29"
-"test2";"27";"30";"28";"31"
+employee,priority1,priority2,priority3,priority4
+"test1",27,28,26,29
+"test2",27,30,28,31
 ```
 
 - `employee`: Employee name (must match name in employees.csv)

@@ -182,8 +182,8 @@ def load_vacation_wishes(filepath: str) -> Dict[str, VacationWish]:
     """Load vacation wishes from CSV file.
     
     Expected format:
-    employee;priority1;priority2;priority3;priority4
-    "test1";"27";"28";"26";"32"
+    employee,priority1,priority2,priority3,priority4
+    "test1",27,28,26,32
     
     Week numbers range from 1-52, summer vacation allowed weeks 18-40.
     
@@ -193,8 +193,8 @@ def load_vacation_wishes(filepath: str) -> Dict[str, VacationWish]:
     wishes = {}
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
-            # Use semicolon as delimiter
-            reader = csv.DictReader(f, delimiter=';')
+            # Use comma as delimiter (standard CSV format)
+            reader = csv.DictReader(f)
             for row in reader:
                 employee_name = row['employee'].strip().strip('"')
                 priorities = {}
