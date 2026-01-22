@@ -7,8 +7,9 @@ maintaining shift coverage requirements.
 """
 
 import csv
+import random
 import sys
-from collections import defaultdict
+from collections import defaultdict, Counter
 from datetime import datetime, timedelta
 from typing import Dict, List, Set, Tuple, Optional
 try:
@@ -182,7 +183,7 @@ def load_vacation_wishes(filepath: str) -> Dict[str, VacationWish]:
     
     Expected format:
     employee;priority1;priority2;priority3;priority4
-    "test 1";"27";"28";"26";"32"
+    "test1";"27";"28";"26";"32"
     
     Week numbers range from 1-52, summer vacation allowed weeks 18-40.
     
@@ -363,7 +364,6 @@ def allocate_vacation_from_wishes(
     
     # Sort requests by priority (lower number = higher priority)
     # For same priority, randomize to be fair
-    import random
     random.seed(42)  # For reproducibility
     requests.sort(key=lambda x: (x[1], random.random()))
     
@@ -430,7 +430,6 @@ def allocate_vacation_from_wishes(
         print(f"  Max weeks allocated: {max(allocated_counts)}")
         
         # Show distribution
-        from collections import Counter
         distribution = Counter(allocated_counts)
         print(f"  Distribution:")
         for weeks in sorted(distribution.keys()):
@@ -513,7 +512,6 @@ def optimize_vacation_schedule(
 
     # Modified allocation algorithm: Split employees into TWO EQUAL GROUPS
     # Group 1 takes vacation in first half, Group 2 in second half
-    import random
     random.seed(42)  # For reproducibility
 
     # Balance groups by weekly_target_hours
@@ -1006,7 +1004,6 @@ def rebalance_shift_assignments(
 
             # Shuffle shifts to try different ones each pass
             if pass_num > 0:
-                import random
                 random.seed(42 + pass_num)
                 random.shuffle(over_emp_shifts)
 
