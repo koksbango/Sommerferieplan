@@ -306,6 +306,78 @@ def can_cover_with_employees(
     return True
 
 
+def check_workload_feasibility(
+    week_dates: List[datetime],
+    employees: List[Employee],
+    vacation_by_date: Dict[datetime, Set[str]],
+    emp_name_requesting: str,
+    coverage_weekday: List[CoverageRequirement],
+    coverage_weekend: List[CoverageRequirement]
+) -> bool:
+    """Check if assigning vacation to an employee would create excessive workload.
+    
+    This validates that working employees wouldn't exceed their max_hours_per_week
+    if the requested vacation is granted.
+    
+    Args:
+        week_dates: List of dates in the week being checked
+        employees: List of all employees
+        vacation_by_date: Current vacation assignments by date
+        emp_name_requesting: Name of employee requesting vacation
+        coverage_weekday: Weekday coverage requirements
+        coverage_weekend: Weekend coverage requirements
+        
+    Returns:
+        True if workload is feasible, False if any employee would be overloaded
+    """
+    # Group dates by week for workload calculation
+    from collections import defaultdict
+    dates_by_week = defaultdict(list)
+    for date in week_dates:
+        week_num = date.isocalendar()[1]
+        dates_by_week[week_num].append(date)
+    
+    # Check each week
+    for week_num, dates_in_week in dates_by_week.items():
+        # Get employees who would be on vacation during this week
+        employees_on_vacation = set()
+        for date in dates_in_week:
+            employees_on_vacation.update(vacation_by_date.get(date, set()))
+        # Add the requesting employee
+        employees_on_vacation.add(emp_name_requesting)
+        
+        # Count working employees
+        num_working = len(employees) - len(employees_on_vacation)
+        
+        if num_working == 0:
+            return False
+        
+        # Calculate total required positions for the week
+        total_positions_needed = 0
+        for date in dates_in_week:
+            is_weekend = date.weekday() in (5, 6)
+            requirements = coverage_weekend if is_weekend else coverage_weekday
+            
+            # Count total positions needed for this day
+            for req in requirements:
+                total_positions_needed += req.required
+        
+        # Calculate average positions per working employee
+        # If the average exceeds a reasonable threshold, reject
+        # Typical: if we need 31 positions per day and have 74 employees,
+        # that's ~42% capacity. If 50% are on vacation, remaining 37 need to cover 31 = 84%
+        # We want to avoid situations where >95% coverage is needed consistently
+        avg_daily_positions = total_positions_needed / len(dates_in_week)
+        coverage_percentage = (avg_daily_positions / num_working) * 100 if num_working > 0 else 100
+        
+        # Reject if coverage would require more than 95% of available employees
+        # This leaves some buffer for unforeseen circumstances
+        if coverage_percentage > 95:
+            return False
+    
+    return True
+
+
 def allocate_vacation_from_wishes(
     employees: List[Employee],
     vacation_wishes: Dict[str, VacationWish],
@@ -321,6 +393,7 @@ def allocate_vacation_from_wishes(
     2. Respecting priority levels (1 is highest, 4 is lowest)
     3. Handling conflicts when multiple employees request the same week
     4. Ensuring shift coverage is maintained
+    5. Preventing excessive workload on remaining employees
     
     Args:
         employees: List of all employees
@@ -354,6 +427,14 @@ def allocate_vacation_from_wishes(
     vacation_by_date = defaultdict(set)  # date -> set of employee names
     employee_weeks_allocated = defaultdict(int)  # employee name -> count of weeks allocated
     
+    # Track rejection reasons for reporting
+    rejections = {
+        'workload': 0,
+        'capacity': 0,
+        'coverage': 0,
+        'already_allocated': 0
+    }
+    
     # Create a list of all (employee, priority, week) tuples
     # This allows us to process requests in order of priority
     requests = []
@@ -382,10 +463,13 @@ def allocate_vacation_from_wishes(
         
         # Check if we can assign this entire week to this employee
         can_assign = True
+        rejection_reason = None
+        
         for date in week_dates:
             # Check if employee already has vacation on this date
             if emp_name in vacation_by_date[date]:
                 can_assign = False
+                rejection_reason = 'already_allocated'
                 break
             
             # Check capacity for this date
@@ -395,6 +479,7 @@ def allocate_vacation_from_wishes(
             
             if current_vacation_count >= max_vacation_today:
                 can_assign = False
+                rejection_reason = 'capacity'
                 break
             
             # Check if coverage can be maintained
@@ -410,7 +495,25 @@ def allocate_vacation_from_wishes(
             
             if not can_cover_with_employees(employees_working, total_needed, skill_requirements):
                 can_assign = False
+                rejection_reason = 'coverage'
                 break
+        
+        # Check workload feasibility for this week
+        if can_assign:
+            if not check_workload_feasibility(
+                week_dates,
+                employees,
+                vacation_by_date,
+                emp_name,
+                coverage_weekday,
+                coverage_weekend
+            ):
+                can_assign = False
+                rejection_reason = 'workload'
+        
+        # Track rejection reasons
+        if not can_assign and rejection_reason:
+            rejections[rejection_reason] += 1
         
         # If we can assign, do it
         if can_assign:
@@ -434,6 +537,15 @@ def allocate_vacation_from_wishes(
         print(f"  Distribution:")
         for weeks in sorted(distribution.keys()):
             print(f"    {weeks} weeks: {distribution[weeks]} employees")
+    
+    # Report rejections
+    total_rejections = sum(rejections.values())
+    if total_rejections > 0:
+        print(f"\n  Vacation requests rejected: {total_rejections}")
+        print(f"    Due to workload constraints: {rejections['workload']}")
+        print(f"    Due to capacity limits: {rejections['capacity']}")
+        print(f"    Due to coverage requirements: {rejections['coverage']}")
+        print(f"    Due to date conflicts: {rejections['already_allocated']}")
     
     return vacation_schedule
 
