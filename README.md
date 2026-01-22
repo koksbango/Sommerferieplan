@@ -48,15 +48,15 @@ python3 vacation_scheduler.py
 
 **Custom parameters:**
 ```bash
-python3 vacation_scheduler.py employees.csv coverage.csv 2026-06-29 5 21
+python3 vacation_scheduler.py employees.csv coverage.csv 2026-04-27 23 21
 ```
 - `employees.csv`: Employee data file
 - `coverage.csv`: Coverage requirements file  
-- `2026-06-29`: Start date (YYYY-MM-DD) - defaults to June 29, 2026 (week 27)
-- `5`: Number of weeks - defaults to 5 weeks (June 29 - August 2, weeks 27-31)
+- `2026-04-27`: Start date (YYYY-MM-DD) - defaults to April 27, 2026 (week 18)
+- `23`: Number of weeks - defaults to 23 weeks (April 27 - October 4, weeks 18-40)
 - `21`: Target vacation days per employee
 
-**Note:** The default vacation period is Week 27 to Week 31 (June 29 - August 2, 2026), which is the standard summer vacation period.
+**Note:** The default vacation period is Week 18 to Week 40 (April 27 - October 4, 2026), which covers the summer vacation period from May to September. The script uses employee vacation wishes from `vacation_wishes.csv` to allocate 3 weeks per employee from their 4 prioritized week requests.
 
 **Example output:**
 ```
@@ -64,28 +64,30 @@ Vacation capacity:
   Weekdays: up to 43 employees on vacation (need 31 working)
   Weekends: up to 48 employees on vacation (need 26 working)
 
-Theoretical maximum:
-  Total vacation-day capacity: 1555
-  If distributed equally: 21 days per employee
+Using vacation wish-based allocation...
 
-Allocating consecutive vacation blocks with equal distribution...
-  Strategy: Split employees into two equal groups
-  Group 1: 37 employees (total weekly hours: 1277)
-  Group 2: 37 employees (total weekly hours: 1261)
+Allocating vacation from wishes (target: 3 weeks per employee):
+  Employees with wishes: 74
+  Weekday capacity: up to 43 employees on vacation
+  Weekend capacity: up to 48 employees on vacation
 
-  Analyzing vacation groups...
-  Group 1 (vacation in first half): 37 employees
-  Group 2 (vacation in second half): 37 employees
-  First vacation starts: 2026-06-29
-  Last vacation starts: 2026-07-16
+Vacation allocation results:
+  Employees with wishes who got vacation: 74
+  Average weeks allocated: 3.0
+  Min weeks allocated: 3
+  Max weeks allocated: 3
+  Distribution:
+    3 weeks: 74 employees
 
 Results:
-  Total vacation days allocated: 1258
-  Average per employee: 17.0 days
-  Minimum: 17 days
-  Maximum: 17 days
+  Total vacation days allocated: 1554
+  Average per employee: 21.0 days
+  Minimum: 21 days
+  Maximum: 21 days
 
-**Note:** With 5 weeks (35 days) and two equal groups, the maximum achievable is 17 consecutive days per employee while maintaining coverage. To achieve the 21-day target, consider extending the period to 6 weeks.
+Distribution:
+  Employees at/above target (21+ days): 74
+  Employees below target: 0
 
 Shift distribution statistics:
   Employees with shifts: 74

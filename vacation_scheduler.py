@@ -1919,12 +1919,17 @@ def main():
     vacation_wishes_file = "vacation_wishes.csv"
 
     # Vacation period parameters
-    # Summer vacation: Week 27 (June 29) to end of Week 31 (August 2)
+    # Summer vacation: Weeks 18-40 (beginning of May to end of September)
+    # Week 18 starts April 27, 2026; Week 40 ends October 4, 2026
     start_year = 2026
-    start_month = 6
-    start_day = 29
-    num_weeks = 5  # 5-week range (35 days)
-    target_days = 21
+    
+    # Calculate start date from week 18
+    jan4 = datetime(start_year, 1, 4)
+    week1_monday = jan4 - timedelta(days=jan4.weekday())
+    start_date = week1_monday + timedelta(weeks=18 - 1)  # Week 18
+    
+    num_weeks = 23  # Weeks 18-40 inclusive (23 weeks)
+    target_days = 21  # Target vacation days per employee
 
     # Parse command line arguments
     if len(sys.argv) > 1:
@@ -1938,6 +1943,7 @@ def main():
             start_year = int(parts[0])
             start_month = int(parts[1])
             start_day = int(parts[2])
+            start_date = datetime(start_year, start_month, start_day)
         except (ValueError, IndexError):
             print(f"Warning: Invalid start date '{start_date_str}', using default", file=sys.stderr)
     if len(sys.argv) > 4:
@@ -1965,8 +1971,6 @@ def main():
     coverage_by_type = get_coverage_requirements_by_type(coverage)
     coverage_weekday = coverage_by_type.get('Weekday', [])
     coverage_weekend = coverage_by_type.get('Weekend', [])
-
-    start_date = datetime(start_year, start_month, start_day)
 
     print("\nOptimizing vacation schedule:")
     print(f"  Start date: {start_date.date()}")
