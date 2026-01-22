@@ -40,11 +40,15 @@ pip install -r requirements.txt
 
 ### Vacation Scheduler (Recommended)
 
-Optimizes vacation allocation to maximize days while maintaining coverage:
+Allocates vacation based on employee wishes while maintaining shift coverage:
 
 ```bash
 python3 vacation_scheduler.py
 ```
+
+**Requirements:**
+- `vacation_wishes.csv` file is **required** - must contain vacation preferences for all employees
+- See [Vacation Wishes CSV](#vacation-wishes-csv-optional) section below for format details
 
 **Custom parameters:**
 ```bash
@@ -56,7 +60,7 @@ python3 vacation_scheduler.py employees.csv coverage.csv 2026-04-27 23 21
 - `23`: Number of weeks - defaults to 23 weeks (April 27 - October 4, weeks 18-40)
 - `21`: Target vacation days per employee
 
-**Note:** The default vacation period is Week 18 to Week 40 (April 27 - October 4, 2026), which covers the summer vacation period from May to September. The script uses employee vacation wishes from `vacation_wishes.csv` to allocate 3 weeks per employee from their 4 prioritized week requests.
+**Note:** The vacation period spans Week 18 to Week 40 (April 27 - October 4, 2026), covering May through September. The script reads employee vacation wishes from `vacation_wishes.csv` and allocates 3 weeks per employee from their 4 prioritized week requests.
 
 **Example output:**
 ```
@@ -190,9 +194,9 @@ type,shift_id,required,required_skills
 - `required`: Number of employees required
 - `required_skills`: Required skill ("None" for general coverage, or specific skill code)
 
-### Vacation Wishes CSV (Optional)
+### Vacation Wishes CSV (Required)
 
-The vacation wishes file allows employees to prioritize their preferred vacation weeks. When present, the scheduler will attempt to allocate 3 weeks out of each employee's 4 requested weeks while maintaining shift coverage.
+The vacation wishes file is **required** for the vacation scheduler to run. It allows employees to prioritize their preferred vacation weeks, and the scheduler allocates 3 weeks out of each employee's 4 requested weeks while maintaining shift coverage.
 
 Format:
 ```csv
@@ -217,10 +221,10 @@ employee,priority1,priority2,priority3,priority4
 - Requests are processed in priority order (priority 1 first, then 2, 3, 4)
 - When multiple employees request the same week, priority levels are used to resolve conflicts
 - Coverage requirements and skill constraints are maintained
-- If the `vacation_wishes.csv` file is not present, the scheduler uses the default allocation algorithm
+- All employees must have vacation wishes defined in the CSV file
 
 ## Output
 
-The script outputs a report showing the maximum vacation days each employee can take:
+The script outputs a report showing vacation allocation results:
 
 ```

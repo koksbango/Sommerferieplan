@@ -1977,29 +1977,23 @@ def main():
     print(f"  Duration: {num_weeks} weeks ({num_weeks * 7} days)")
     print(f"  Target: {target_days} days per employee")
 
-    # Check if we should use wish-based allocation
-    if vacation_wishes:
-        print("\nUsing vacation wish-based allocation...")
-        # Allocate 3 weeks per employee from their 4 requested weeks
-        vacation_schedule = allocate_vacation_from_wishes(
-            employees,
-            vacation_wishes,
-            coverage_weekday,
-            coverage_weekend,
-            start_year,
-            weeks_per_employee=3
-        )
-    else:
-        print("\nNo vacation wishes found, using default optimization...")
-        # Optimize vacation schedule using the old method
-        vacation_schedule = optimize_vacation_schedule(
-            employees,
-            coverage_weekday,
-            coverage_weekend,
-            start_date,
-            num_weeks,
-            target_days
-        )
+    # Require vacation wishes for allocation
+    if not vacation_wishes:
+        print("\nERROR: No vacation wishes found!", file=sys.stderr)
+        print("The vacation_wishes.csv file is required for vacation scheduling.", file=sys.stderr)
+        print("Please ensure the file exists and contains vacation preferences for all employees.", file=sys.stderr)
+        sys.exit(1)
+    
+    print("\nUsing vacation wish-based allocation...")
+    # Allocate 3 weeks per employee from their 4 requested weeks
+    vacation_schedule = allocate_vacation_from_wishes(
+        employees,
+        vacation_wishes,
+        coverage_weekday,
+        coverage_weekend,
+        start_year,
+        weeks_per_employee=3
+    )
 
     # Print results
     print_vacation_results(vacation_schedule, employees, num_weeks, target_days)
