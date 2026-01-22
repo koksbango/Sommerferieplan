@@ -378,6 +378,109 @@ def check_workload_feasibility(
     return True
 
 
+def find_alternative_week(
+    preferred_week: int,
+    emp_name: str,
+    employees: List[Employee],
+    vacation_by_week: Dict[int, Set[str]],
+    vacation_by_date: Dict[datetime, Set[str]],
+    year: int,
+    coverage_weekday: List[CoverageRequirement],
+    coverage_weekend: List[CoverageRequirement],
+    weekday_total: int,
+    weekend_total: int,
+    max_vacation_weekday: int,
+    max_vacation_weekend: int,
+    max_distance: int = 3
+) -> Optional[int]:
+    """Find an alternative week near the preferred week that can be allocated.
+    
+    Searches for weeks within max_distance of the preferred week, trying closer weeks first.
+    
+    Args:
+        preferred_week: The originally requested week number
+        emp_name: Name of the employee
+        employees: List of all employees
+        vacation_by_week: Current vacation assignments by week
+        vacation_by_date: Current vacation assignments by date
+        year: Year for scheduling
+        coverage_weekday: Weekday coverage requirements
+        coverage_weekend: Weekend coverage requirements
+        weekday_total: Total employees needed on weekdays
+        weekend_total: Total employees needed on weekends
+        max_vacation_weekday: Max employees that can be on vacation on weekdays
+        max_vacation_weekend: Max employees that can be on vacation on weekends
+        max_distance: Maximum number of weeks to search away from preferred (default 3)
+        
+    Returns:
+        Week number of alternative week, or None if no suitable alternative found
+    """
+    # Try weeks in order of proximity: preferred±1, preferred±2, preferred±3
+    for distance in range(1, max_distance + 1):
+        for offset in [distance, -distance]:  # Try after first, then before
+            alt_week = preferred_week + offset
+            
+            # Check if week is in valid range (18-40)
+            if not (18 <= alt_week <= 40):
+                continue
+            
+            # Check if employee already has this week
+            if emp_name in vacation_by_week.get(alt_week, set()):
+                continue
+            
+            # Get dates for this alternative week
+            week_dates = get_dates_for_week(year, alt_week)
+            
+            # Check if we can assign this week
+            can_assign = True
+            
+            for date in week_dates:
+                # Check if employee already has vacation on this date
+                if emp_name in vacation_by_date.get(date, set()):
+                    can_assign = False
+                    break
+                
+                # Check capacity
+                is_weekend = date.weekday() in (5, 6)
+                max_vacation_today = max_vacation_weekend if is_weekend else max_vacation_weekday
+                current_vacation_count = len(vacation_by_date.get(date, set()))
+                
+                if current_vacation_count >= max_vacation_today:
+                    can_assign = False
+                    break
+                
+                # Check coverage
+                requirements = coverage_weekend if is_weekend else coverage_weekday
+                total_needed = weekend_total if is_weekend else weekday_total
+                _, skill_requirements = calculate_min_employees_needed(requirements)
+                
+                employees_working = []
+                for emp in employees:
+                    if emp.name not in vacation_by_date.get(date, set()) and emp.name != emp_name:
+                        employees_working.append(emp)
+                
+                if not can_cover_with_employees(employees_working, total_needed, skill_requirements):
+                    can_assign = False
+                    break
+            
+            # Check workload feasibility
+            if can_assign:
+                if not check_workload_feasibility(
+                    week_dates,
+                    employees,
+                    vacation_by_date,
+                    emp_name,
+                    coverage_weekday,
+                    coverage_weekend
+                ):
+                    can_assign = False
+            
+            if can_assign:
+                return alt_week
+    
+    return None
+
+
 def allocate_vacation_from_wishes(
     employees: List[Employee],
     vacation_wishes: Dict[str, VacationWish],
@@ -511,16 +614,43 @@ def allocate_vacation_from_wishes(
                 can_assign = False
                 rejection_reason = 'workload'
         
-        # Track rejection reasons
-        if not can_assign and rejection_reason:
-            rejections[rejection_reason] += 1
+        # If rejected, try to find an alternative week nearby
+        assigned_week = week_num
+        if not can_assign:
+            # Try to find an alternative week close to the requested week
+            alt_week = find_alternative_week(
+                week_num,
+                emp_name,
+                employees,
+                vacation_by_week,
+                vacation_by_date,
+                year,
+                coverage_weekday,
+                coverage_weekend,
+                weekday_total,
+                weekend_total,
+                max_vacation_weekday,
+                max_vacation_weekend,
+                max_distance=5  # Search up to 5 weeks away for alternatives
+            )
+            
+            if alt_week is not None:
+                # Found an alternative - use it instead
+                assigned_week = alt_week
+                week_dates = get_dates_for_week(year, alt_week)
+                can_assign = True
+                rejections['reallocated'] = rejections.get('reallocated', 0) + 1
+            else:
+                # No alternative found - track rejection
+                if rejection_reason:
+                    rejections[rejection_reason] += 1
         
-        # If we can assign, do it
+        # If we can assign (either original or alternative), do it
         if can_assign:
             for date in week_dates:
                 vacation_schedule[emp_name].append(date)
                 vacation_by_date[date].add(emp_name)
-            vacation_by_week[week_num].add(emp_name)
+            vacation_by_week[assigned_week].add(emp_name)
             employee_weeks_allocated[emp_name] += 1
     
     # Report allocation results
@@ -538,14 +668,22 @@ def allocate_vacation_from_wishes(
         for weeks in sorted(distribution.keys()):
             print(f"    {weeks} weeks: {distribution[weeks]} employees")
     
-    # Report rejections
-    total_rejections = sum(rejections.values())
+    # Report rejections and reallocations
+    reallocated = rejections.get('reallocated', 0)
+    if reallocated > 0:
+        print(f"\n  Vacation requests reallocated to nearby weeks: {reallocated}")
+    
+    total_rejections = sum(v for k, v in rejections.items() if k != 'reallocated')
     if total_rejections > 0:
-        print(f"\n  Vacation requests rejected: {total_rejections}")
-        print(f"    Due to workload constraints: {rejections['workload']}")
-        print(f"    Due to capacity limits: {rejections['capacity']}")
-        print(f"    Due to coverage requirements: {rejections['coverage']}")
-        print(f"    Due to date conflicts: {rejections['already_allocated']}")
+        print(f"\n  Vacation requests rejected (no alternative found): {total_rejections}")
+        if rejections.get('workload', 0) > 0:
+            print(f"    Due to workload constraints: {rejections['workload']}")
+        if rejections.get('capacity', 0) > 0:
+            print(f"    Due to capacity limits: {rejections['capacity']}")
+        if rejections.get('coverage', 0) > 0:
+            print(f"    Due to coverage requirements: {rejections['coverage']}")
+        if rejections.get('already_allocated', 0) > 0:
+            print(f"    Due to date conflicts: {rejections['already_allocated']}")
     
     return vacation_schedule
 
