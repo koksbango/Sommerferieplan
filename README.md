@@ -188,6 +188,35 @@ type,shift_id,required,required_skills
 - `required`: Number of employees required
 - `required_skills`: Required skill ("None" for general coverage, or specific skill code)
 
+### Vacation Wishes CSV (Optional)
+
+The vacation wishes file allows employees to prioritize their preferred vacation weeks. When present, the scheduler will attempt to allocate 3 weeks out of each employee's 4 requested weeks while maintaining shift coverage.
+
+Format:
+```csv
+employee;priority1;priority2;priority3;priority4
+"test1";"27";"28";"26";"29"
+"test2";"27";"30";"28";"31"
+```
+
+- `employee`: Employee name (must match name in employees.csv)
+- `priority1`: Week number for highest priority (1 = most desired)
+- `priority2`: Week number for second priority
+- `priority3`: Week number for third priority
+- `priority4`: Week number for lowest priority (4 = least desired)
+
+**Week Numbers:**
+- Week numbers range from 1 to 52 (ISO week numbers)
+- Summer vacation period: weeks 18-40 (beginning of May to end of September)
+- Requests outside the 18-40 range will be rejected with a warning
+
+**Allocation Strategy:**
+- The system allocates 3 weeks per employee from their 4 requested weeks
+- Requests are processed in priority order (priority 1 first, then 2, 3, 4)
+- When multiple employees request the same week, priority levels are used to resolve conflicts
+- Coverage requirements and skill constraints are maintained
+- If the `vacation_wishes.csv` file is not present, the scheduler uses the default allocation algorithm
+
 ## Output
 
 The script outputs a report showing the maximum vacation days each employee can take:
