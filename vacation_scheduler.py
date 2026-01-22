@@ -7,8 +7,9 @@ maintaining shift coverage requirements.
 """
 
 import csv
+import random
 import sys
-from collections import defaultdict
+from collections import defaultdict, Counter
 from datetime import datetime, timedelta
 from typing import Dict, List, Set, Tuple, Optional
 try:
@@ -37,6 +38,30 @@ class Employee:
 
     def __repr__(self):
         return f"Employee({self.name}, {self.skills})"
+
+
+class VacationWish:
+    """Represents an employee's vacation wishes with priorities."""
+
+    def __init__(self, employee_name: str, priorities: Dict[int, int]):
+        """
+        Args:
+            employee_name: Name of the employee
+            priorities: Dict mapping priority level (1-4) to week number (1-52)
+        """
+        self.employee_name = employee_name
+        self.priorities = priorities  # {1: week_num, 2: week_num, 3: week_num, 4: week_num}
+
+    def get_week_by_priority(self, priority: int) -> Optional[int]:
+        """Get the week number for a given priority level."""
+        return self.priorities.get(priority)
+
+    def get_all_weeks_sorted(self) -> List[int]:
+        """Get all requested weeks sorted by priority (highest first)."""
+        return [self.priorities[p] for p in sorted(self.priorities.keys()) if p in self.priorities]
+
+    def __repr__(self):
+        return f"VacationWish({self.employee_name}, {self.priorities})"
 
 
 class CoverageRequirement:
@@ -153,6 +178,55 @@ def load_coverage(filepath: str) -> List[CoverageRequirement]:
     return coverage
 
 
+def load_vacation_wishes(filepath: str) -> Dict[str, VacationWish]:
+    """Load vacation wishes from CSV file.
+    
+    Expected format:
+    employee;priority1;priority2;priority3;priority4
+    "test1";"27";"28";"26";"32"
+    
+    Week numbers range from 1-52, summer vacation allowed weeks 18-40.
+    
+    Returns:
+        Dict mapping employee name -> VacationWish object
+    """
+    wishes = {}
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            # Use semicolon as delimiter
+            reader = csv.DictReader(f, delimiter=';')
+            for row in reader:
+                employee_name = row['employee'].strip().strip('"')
+                priorities = {}
+                
+                # Parse the 4 priority levels
+                for priority_num in range(1, 5):
+                    priority_key = f'priority{priority_num}'
+                    if priority_key in row and row[priority_key].strip():
+                        week_num = int(row[priority_key].strip().strip('"'))
+                        
+                        # Validate week number is in allowed range (18-40 for summer)
+                        if not (18 <= week_num <= 40):
+                            print(f"Warning: Employee '{employee_name}' requested week {week_num} "
+                                  f"(priority {priority_num}), which is outside summer vacation range (18-40). Skipping.",
+                                  file=sys.stderr)
+                            continue
+                        
+                        priorities[priority_num] = week_num
+                
+                if priorities:
+                    wishes[employee_name] = VacationWish(employee_name, priorities)
+                    
+    except FileNotFoundError:
+        print(f"Warning: Vacation wishes file '{filepath}' not found. Proceeding without wishes.", file=sys.stderr)
+        return {}
+    except Exception as e:
+        print(f"Error reading vacation wishes file: {e}", file=sys.stderr)
+        return {}
+    
+    return wishes
+
+
 def get_coverage_requirements_by_type(coverage: List[CoverageRequirement]) -> Dict[str, List[CoverageRequirement]]:
     """Organize coverage requirements by day type."""
     requirements = defaultdict(list)
@@ -177,6 +251,42 @@ def calculate_min_employees_needed(requirements: List[CoverageRequirement]) -> T
     return total_positions, dict(skill_requirements)
 
 
+def week_number_to_dates(year: int, week_num: int) -> Tuple[datetime, datetime]:
+    """Convert ISO week number to start and end dates (Monday to Sunday).
+    
+    Args:
+        year: The year
+        week_num: ISO week number (1-52/53)
+        
+    Returns:
+        Tuple of (start_date, end_date) for the week
+    """
+    # ISO week date: Week 1 is the first week with Thursday in it
+    # Find January 4th (always in week 1)
+    jan4 = datetime(year, 1, 4)
+    week1_monday = jan4 - timedelta(days=jan4.weekday())
+    
+    # Calculate the Monday of the target week
+    week_start = week1_monday + timedelta(weeks=week_num - 1)
+    week_end = week_start + timedelta(days=6)  # Sunday
+    
+    return week_start, week_end
+
+
+def get_dates_for_week(year: int, week_num: int) -> List[datetime]:
+    """Get all dates (Monday-Sunday) for a given week number.
+    
+    Args:
+        year: The year
+        week_num: ISO week number (1-52/53)
+        
+    Returns:
+        List of 7 datetime objects representing the week
+    """
+    week_start, _ = week_number_to_dates(year, week_num)
+    return [week_start + timedelta(days=i) for i in range(7)]
+
+
 def can_cover_with_employees(
     employees_available: List[Employee],
     total_needed: int,
@@ -194,6 +304,138 @@ def can_cover_with_employees(
             return False
 
     return True
+
+
+def allocate_vacation_from_wishes(
+    employees: List[Employee],
+    vacation_wishes: Dict[str, VacationWish],
+    coverage_weekday: List[CoverageRequirement],
+    coverage_weekend: List[CoverageRequirement],
+    year: int,
+    weeks_per_employee: int = 3
+) -> Dict[str, List[datetime]]:
+    """Allocate vacation based on employee wishes, prioritizing higher priority weeks.
+    
+    This function attempts to fairly distribute vacation by:
+    1. Allocating weeks_per_employee (default 3) out of 4 requested weeks per employee
+    2. Respecting priority levels (1 is highest, 4 is lowest)
+    3. Handling conflicts when multiple employees request the same week
+    4. Ensuring shift coverage is maintained
+    
+    Args:
+        employees: List of all employees
+        vacation_wishes: Dict mapping employee name to VacationWish
+        coverage_weekday: Coverage requirements for weekdays
+        coverage_weekend: Coverage requirements for weekends
+        year: Year for vacation scheduling
+        weeks_per_employee: Target number of weeks to allocate per employee (default 3)
+        
+    Returns:
+        Dict mapping employee name -> list of vacation dates
+    """
+    # Calculate minimum employees needed per day type
+    weekday_total, weekday_skills = calculate_min_employees_needed(coverage_weekday)
+    weekend_total, weekend_skills = calculate_min_employees_needed(coverage_weekend)
+    
+    total_employees = len(employees)
+    
+    # Calculate max vacation capacity per day type
+    max_vacation_weekday = total_employees - weekday_total
+    max_vacation_weekend = total_employees - weekend_total
+    
+    print(f"\nAllocating vacation from wishes (target: {weeks_per_employee} weeks per employee):")
+    print(f"  Employees with wishes: {len(vacation_wishes)}")
+    print(f"  Weekday capacity: up to {max_vacation_weekday} employees on vacation")
+    print(f"  Weekend capacity: up to {max_vacation_weekend} employees on vacation")
+    
+    # Initialize vacation schedule
+    vacation_schedule = {emp.name: [] for emp in employees}
+    vacation_by_week = defaultdict(set)  # week_num -> set of employee names
+    vacation_by_date = defaultdict(set)  # date -> set of employee names
+    employee_weeks_allocated = defaultdict(int)  # employee name -> count of weeks allocated
+    
+    # Create a list of all (employee, priority, week) tuples
+    # This allows us to process requests in order of priority
+    requests = []
+    for emp_name, wish in vacation_wishes.items():
+        for priority in sorted(wish.priorities.keys()):
+            week_num = wish.priorities[priority]
+            requests.append((emp_name, priority, week_num))
+    
+    # Sort requests by priority (lower number = higher priority)
+    # For same priority, randomize to be fair
+    random.seed(42)  # For reproducibility
+    requests.sort(key=lambda x: (x[1], random.random()))
+    
+    # Process requests in priority order
+    for emp_name, priority, week_num in requests:
+        # Check if this employee already has enough weeks
+        if employee_weeks_allocated[emp_name] >= weeks_per_employee:
+            continue
+        
+        # Check if this week is already assigned to this employee
+        if emp_name in vacation_by_week[week_num]:
+            continue
+        
+        # Get all dates for this week
+        week_dates = get_dates_for_week(year, week_num)
+        
+        # Check if we can assign this entire week to this employee
+        can_assign = True
+        for date in week_dates:
+            # Check if employee already has vacation on this date
+            if emp_name in vacation_by_date[date]:
+                can_assign = False
+                break
+            
+            # Check capacity for this date
+            is_weekend = date.weekday() in (5, 6)
+            max_vacation_today = max_vacation_weekend if is_weekend else max_vacation_weekday
+            current_vacation_count = len(vacation_by_date[date])
+            
+            if current_vacation_count >= max_vacation_today:
+                can_assign = False
+                break
+            
+            # Check if coverage can be maintained
+            requirements = coverage_weekend if is_weekend else coverage_weekday
+            total_needed = weekend_total if is_weekend else weekday_total
+            _, skill_requirements = calculate_min_employees_needed(requirements)
+            
+            # Get list of employees who would be working (not on vacation)
+            employees_working = []
+            for emp in employees:
+                if emp.name not in vacation_by_date[date] and emp.name != emp_name:
+                    employees_working.append(emp)
+            
+            if not can_cover_with_employees(employees_working, total_needed, skill_requirements):
+                can_assign = False
+                break
+        
+        # If we can assign, do it
+        if can_assign:
+            for date in week_dates:
+                vacation_schedule[emp_name].append(date)
+                vacation_by_date[date].add(emp_name)
+            vacation_by_week[week_num].add(emp_name)
+            employee_weeks_allocated[emp_name] += 1
+    
+    # Report allocation results
+    print("\nVacation allocation results:")
+    allocated_counts = list(employee_weeks_allocated.values())
+    if allocated_counts:
+        print(f"  Employees with wishes who got vacation: {len([c for c in allocated_counts if c > 0])}")
+        print(f"  Average weeks allocated: {sum(allocated_counts) / len(allocated_counts):.1f}")
+        print(f"  Min weeks allocated: {min(allocated_counts)}")
+        print(f"  Max weeks allocated: {max(allocated_counts)}")
+        
+        # Show distribution
+        distribution = Counter(allocated_counts)
+        print(f"  Distribution:")
+        for weeks in sorted(distribution.keys()):
+            print(f"    {weeks} weeks: {distribution[weeks]} employees")
+    
+    return vacation_schedule
 
 
 def optimize_vacation_schedule(
@@ -270,7 +512,6 @@ def optimize_vacation_schedule(
 
     # Modified allocation algorithm: Split employees into TWO EQUAL GROUPS
     # Group 1 takes vacation in first half, Group 2 in second half
-    import random
     random.seed(42)  # For reproducibility
 
     # Balance groups by weekly_target_hours
@@ -763,7 +1004,6 @@ def rebalance_shift_assignments(
 
             # Shuffle shifts to try different ones each pass
             if pass_num > 0:
-                import random
                 random.seed(42 + pass_num)
                 random.shuffle(over_emp_shifts)
 
@@ -1676,6 +1916,7 @@ def main():
     employees_file = "employees.csv"
     shifts_file = "shifts.csv"
     coverage_file = "coverage.csv"
+    vacation_wishes_file = "vacation_wishes.csv"
 
     # Vacation period parameters
     # Summer vacation: Week 27 (June 29) to end of Week 31 (August 2)
@@ -1715,6 +1956,10 @@ def main():
     print(f"Loading coverage requirements from: {coverage_file}")
     coverage = load_coverage(coverage_file)
     print(f"  Loaded {len(coverage)} coverage requirements")
+    
+    print(f"Loading vacation wishes from: {vacation_wishes_file}")
+    vacation_wishes = load_vacation_wishes(vacation_wishes_file)
+    print(f"  Loaded {len(vacation_wishes)} employee vacation wishes")
 
     # Organize coverage by day type
     coverage_by_type = get_coverage_requirements_by_type(coverage)
@@ -1728,15 +1973,29 @@ def main():
     print(f"  Duration: {num_weeks} weeks ({num_weeks * 7} days)")
     print(f"  Target: {target_days} days per employee")
 
-    # Optimize vacation schedule
-    vacation_schedule = optimize_vacation_schedule(
-        employees,
-        coverage_weekday,
-        coverage_weekend,
-        start_date,
-        num_weeks,
-        target_days
-    )
+    # Check if we should use wish-based allocation
+    if vacation_wishes:
+        print("\nUsing vacation wish-based allocation...")
+        # Allocate 3 weeks per employee from their 4 requested weeks
+        vacation_schedule = allocate_vacation_from_wishes(
+            employees,
+            vacation_wishes,
+            coverage_weekday,
+            coverage_weekend,
+            start_year,
+            weeks_per_employee=3
+        )
+    else:
+        print("\nNo vacation wishes found, using default optimization...")
+        # Optimize vacation schedule using the old method
+        vacation_schedule = optimize_vacation_schedule(
+            employees,
+            coverage_weekday,
+            coverage_weekend,
+            start_date,
+            num_weeks,
+            target_days
+        )
 
     # Print results
     print_vacation_results(vacation_schedule, employees, num_weeks, target_days)
