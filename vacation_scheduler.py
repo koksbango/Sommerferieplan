@@ -488,7 +488,7 @@ def allocate_vacation_from_wishes(
     coverage_weekend: List[CoverageRequirement],
     year: int,
     weeks_per_employee: int = 3
-) -> Dict[str, List[datetime]]:
+) -> Tuple[Dict[str, List[datetime]], Dict[str, Set[datetime]]]:
     """Allocate vacation based on employee wishes, prioritizing higher priority weeks.
     
     This function attempts to fairly distribute vacation by:
@@ -507,7 +507,9 @@ def allocate_vacation_from_wishes(
         weeks_per_employee: Target number of weeks to allocate per employee (default 3)
         
     Returns:
-        Dict mapping employee name -> list of vacation dates
+        Tuple of:
+        - Dict mapping employee name -> list of vacation dates
+        - Dict mapping employee name -> set of dates that are alternatives (not originally requested)
     """
     # Calculate minimum employees needed per day type
     weekday_total, weekday_skills = calculate_min_employees_needed(coverage_weekday)
@@ -526,6 +528,7 @@ def allocate_vacation_from_wishes(
     
     # Initialize vacation schedule
     vacation_schedule = {emp.name: [] for emp in employees}
+    alternative_dates = {emp.name: set() for emp in employees}  # Track dates that are alternatives
     vacation_by_week = defaultdict(set)  # week_num -> set of employee names
     vacation_by_date = defaultdict(set)  # date -> set of employee names
     employee_weeks_allocated = defaultdict(int)  # employee name -> count of weeks allocated
@@ -640,6 +643,9 @@ def allocate_vacation_from_wishes(
                 week_dates = get_dates_for_week(year, alt_week)
                 can_assign = True
                 rejections['reallocated'] = rejections.get('reallocated', 0) + 1
+                # Mark these dates as alternatives for this employee
+                for date in week_dates:
+                    alternative_dates[emp_name].add(date)
             else:
                 # No alternative found - track rejection
                 if rejection_reason:
@@ -685,7 +691,7 @@ def allocate_vacation_from_wishes(
         if rejections.get('already_allocated', 0) > 0:
             print(f"    Due to date conflicts: {rejections['already_allocated']}")
     
-    return vacation_schedule
+    return vacation_schedule, alternative_dates
 
 
 def optimize_vacation_schedule(
@@ -1638,7 +1644,8 @@ def export_schedule_to_excel(
     shifts: Dict[str, 'Shift'],
     start_date: datetime,
     num_weeks: int,
-    filename: str = "vacation_schedule.xlsx"
+    filename: str = "vacation_schedule.xlsx",
+    alternative_dates: Optional[Dict[str, Set[datetime]]] = None
 ) -> Optional[str]:
     """Export vacation schedule to Excel file with visual calendar view and shift coverage.
 
@@ -1651,6 +1658,7 @@ def export_schedule_to_excel(
         start_date: Start date of vacation period
         num_weeks: Number of weeks in the period
         filename: Output filename (default: vacation_schedule.xlsx)
+        alternative_dates: Dict mapping employee name -> set of dates that are alternatives (not wished)
 
     Returns:
         Path to the generated file, or None if openpyxl is not available
@@ -1677,7 +1685,8 @@ def export_schedule_to_excel(
     # Define styles
     header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
     header_font = Font(color="FFFFFF", bold=True)
-    vacation_fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
+    vacation_fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")  # Light green - wished vacation
+    alternative_vacation_fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")  # Gold - alternative vacation
     working_fill = PatternFill(start_color="FFE4B5", end_color="FFE4B5", fill_type="solid")
     weekend_header_fill = PatternFill(start_color="FF6B6B", end_color="FF6B6B", fill_type="solid")
 
@@ -1784,6 +1793,10 @@ def export_schedule_to_excel(
     ws_vacation.cell(1, total_pct_target_col).border = border
     ws_vacation.column_dimensions[ws_vacation.cell(1, total_pct_target_col).column_letter].width = 10
 
+    # Initialize alternative_dates if not provided
+    if alternative_dates is None:
+        alternative_dates = {}
+    
     # Convert vacation_schedule to set of dates for faster lookup
     vacation_dates_by_employee = {
         name: set(dates) for name, dates in vacation_schedule.items()
@@ -1815,7 +1828,11 @@ def export_schedule_to_excel(
 
             if date in vacation_dates_by_employee.get(emp.name, set()):
                 cell.value = "V"
-                cell.fill = vacation_fill
+                # Check if this is an alternative vacation date
+                if date in alternative_dates.get(emp.name, set()):
+                    cell.fill = alternative_vacation_fill  # Gold for alternatives
+                else:
+                    cell.fill = vacation_fill  # Light green for wished vacation
                 cell.font = Font(bold=True)
                 vacation_count += 1
             else:
@@ -2236,7 +2253,7 @@ def main():
     
     print("\nUsing vacation wish-based allocation...")
     # Allocate 3 weeks per employee from their 4 requested weeks
-    vacation_schedule = allocate_vacation_from_wishes(
+    vacation_schedule, alternative_dates = allocate_vacation_from_wishes(
         employees,
         vacation_wishes,
         coverage_weekday,
@@ -2258,7 +2275,8 @@ def main():
         shifts,
         start_date,
         num_weeks,
-        "vacation_schedule.xlsx"
+        "vacation_schedule.xlsx",
+        alternative_dates  # Pass alternative dates for different coloring
     )
 
     if excel_file:
